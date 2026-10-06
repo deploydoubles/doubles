@@ -15,3 +15,9 @@ it('answers null without DEPLOY_RUN_ID or without the header', function () {
         ->and(RunIdMatcher::match('run-123', null))->toBeNull()
         ->and(RunIdMatcher::match('', ''))->toBeNull();
 });
+
+it('ignores surrounding whitespace on both sides', function () {
+    expect(RunIdMatcher::match("run-123\n", ' run-123 '))->toBeTrue()
+        ->and(RunIdMatcher::match('  ', 'run-123'))->toBeNull()
+        ->and(RunIdMatcher::match('run-123', "\t"))->toBeNull();
+});

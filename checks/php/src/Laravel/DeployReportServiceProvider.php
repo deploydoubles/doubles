@@ -44,8 +44,9 @@ final class DeployReportServiceProvider extends ServiceProvider
         }
 
         // No withoutOverlapping(): its mutex lives in the cache this command checks.
+        // In the background, so a check waiting on a dead service never delays the app's own tasks.
         $this->callAfterResolving(Schedule::class, static function (Schedule $schedule): void {
-            $schedule->command(RunCommand::NAME)->everyMinute()->name('deploy-report');
+            $schedule->command(RunCommand::NAME)->everyMinute()->runInBackground()->name('deploy-report');
         });
     }
 }

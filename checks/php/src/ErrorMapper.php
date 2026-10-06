@@ -21,6 +21,8 @@ final class ErrorMapper
     private const MYSQL_AUTH = [1044, 1045, 1698];
     private const MYSQL_UNKNOWN_DATABASE = [1049];
     private const MYSQL_UNKNOWN_TABLE = [1146];
+    /** ER_NOT_SUPPORTED_YET (also Vitess), ER_GTID_UNSAFE_CREATE_DROP_TEMPORARY_TABLE_IN_TRANSACTION. */
+    private const MYSQL_UNSUPPORTED = [1235, 1787];
 
     public static function map(string $check, Throwable $error): string
     {
@@ -31,6 +33,14 @@ final class ErrorMapper
             'storage' => Codes::STORAGE_ERROR,
             default => Codes::CHECK_ERROR,
         };
+    }
+
+    /** Whether the database server reported the statement as unsupported (SQLSTATE 0A000 or the MySQL equivalents). */
+    public static function isUnsupported(Throwable $error): bool
+    {
+        [$sqlState, $driverCode] = self::sqlCodes($error);
+
+        return $sqlState === '0A000' || in_array($driverCode, self::MYSQL_UNSUPPORTED, true);
     }
 
     private static function database(Throwable $error): string

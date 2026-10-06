@@ -14,10 +14,12 @@ final class RunIdMatcher
 
     public static function match(?string $configured, ?string $presented): ?bool
     {
-        if ($configured === null || $configured === '' || $presented === null || $presented === '') {
+        $configured = $configured === null ? '' : trim($configured);
+        $presented = $presented === null ? '' : trim($presented);
+        if ($configured === '' || $presented === '') {
             return null;
         }
 
-        return hash_equals($configured, trim($presented));
+        return hash_equals($configured, $presented);
     }
 }

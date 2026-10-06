@@ -37,6 +37,23 @@ it('maps database errors by SQLSTATE and driver code only', function (PDOExcepti
     'other' => [fn () => pdoError('HY000', 9999, 'something about leaky_user'), Codes::DATABASE_ERROR],
 ]);
 
+it('recognises a server that does not support a statement by its codes', function (PDOException $error, bool $unsupported) {
+    expect(ErrorMapper::isUnsupported(leakyQueryException($error)))->toBe($unsupported);
+})->with([
+    'sqlstate 0A000' => [fn () => pdoError('0A000', 7, 'feature not supported'), true],
+    'vitess / mysql not supported yet' => [fn () => pdoError('42000', 1235, 'VT12001: unsupported: temporary table'), true],
+    'gtid consistency' => [fn () => pdoError('HY000', 1787, 'Statement violates GTID consistency'), true],
+    'denied' => [fn () => pdoError('42000', 1044, "Access denied for user 'leaky_user'"), false],
+    'read only' => [fn () => pdoError('HY000', 1290, 'read-only'), false],
+]);
+
+it('drops only the temporary probe table', function () {
+    expect(\DeployDoubles\Checks\Laravel\LaravelChecks::dropTemporaryTable('mysql'))->toBe('DROP TEMPORARY TABLE deploy_report_probe')
+        ->and(\DeployDoubles\Checks\Laravel\LaravelChecks::dropTemporaryTable('mariadb'))->toBe('DROP TEMPORARY TABLE deploy_report_probe')
+        ->and(\DeployDoubles\Checks\Laravel\LaravelChecks::dropTemporaryTable('pgsql'))->toBe('DROP TABLE pg_temp.deploy_report_probe')
+        ->and(\DeployDoubles\Checks\Laravel\LaravelChecks::dropTemporaryTable('sqlite'))->toBe('DROP TABLE temp.deploy_report_probe');
+});
+
 it('puts no error text, user, host, password, path or DSN into the full-tier report', function () {
     $dir = tempDir();
     $config = new Config($dir, ['database' => ['expected' => 'mysql'], 'scheduler' => []], tier: 'full');

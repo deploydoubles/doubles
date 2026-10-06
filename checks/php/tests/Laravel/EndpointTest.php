@@ -92,10 +92,12 @@ it('answers the probe with the worker commit when the job runs', function () {
         ->and($checks['queue.release']['status'])->toBe('pass');
 });
 
-it('registers the run command on the schedule every minute', function () {
+it('registers the run command on the schedule every minute, in the background', function () {
     $schedule = app(\Illuminate\Console\Scheduling\Schedule::class);
     $events = collect($schedule->events())->filter(fn ($e) => str_contains($e->command ?? '', RunCommand::NAME));
 
     expect($events)->toHaveCount(1)
-        ->and($events->first()->expression)->toBe('* * * * *');
+        ->and($events->first()->expression)->toBe('* * * * *')
+        ->and($events->first()->runInBackground)->toBeTrue()
+        ->and($events->first()->withoutOverlapping)->toBeFalse();
 });

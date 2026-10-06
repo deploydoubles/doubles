@@ -12,6 +12,8 @@ use DeployDoubles\Checks\CheckResult;
 use DeployDoubles\Checks\Codes;
 use DeployDoubles\Checks\Config;
 use DeployDoubles\Checks\Environment;
+use DeployDoubles\Checks\ErrorMapper;
+use DeployDoubles\Checks\Status;
 use Dotenv\Parser\Parser;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Str;
@@ -71,11 +73,27 @@ final class LaravelChecks
         $value = bin2hex(random_bytes(8));
         try {
             $connection->statement('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
+        } catch (\Throwable $e) {
+            if (ErrorMapper::isUnsupported($e)) {
+                // Some servers (e.g. Vitess-based ones) have no temporary tables.
+                // That is a limit of the test, not a fault of the deploy.
+                return new CheckResult(Status::Skip, $expected, $observed, Codes::DATABASE_WRITE_UNSUPPORTED, 'connected; 0 migrations pending; no temporary tables on this server, write test skipped');
+            }
+
+            return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'write then read failed', $expected, $observed);
+        }
+
+        try {
             $connection->insert('INSERT INTO deploy_report_probe (v) VALUES (?)', [$value]);
             $read = $connection->selectOne('SELECT v FROM deploy_report_probe');
-            $connection->statement('DROP TABLE deploy_report_probe');
         } catch (\Throwable) {
             return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'write then read failed', $expected, $observed);
+        } finally {
+            try {
+                $connection->statement(self::dropTemporaryTable($connection->getDriverName()));
+            } catch (\Throwable) {
+                // A temporary table ends with the session anyway.
+            }
         }
 
         if (($read->v ?? null) !== $value) {
@@ -211,6 +229,20 @@ final class LaravelChecks
     private static function blank(?string $value): bool
     {
         return $value === null || in_array(strtolower(trim($value)), self::BLANK, true);
+    }
+
+    /**
+     * Drops only the temporary table: a plain DROP TABLE on MySQL would drop a
+     * real table of the same name, and would commit an open transaction.
+     */
+    public static function dropTemporaryTable(string $driver): string
+    {
+        return match ($driver) {
+            'mysql', 'mariadb' => 'DROP TEMPORARY TABLE deploy_report_probe',
+            'pgsql' => 'DROP TABLE pg_temp.deploy_report_probe',
+            'sqlite' => 'DROP TABLE temp.deploy_report_probe',
+            default => 'DROP TABLE deploy_report_probe',
+        };
     }
 
     private static function slug(string $driver): string
