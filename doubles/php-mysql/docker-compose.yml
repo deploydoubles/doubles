@@ -34,7 +34,7 @@ services:
       retries: 40
 
   # What a platform's cron does with the committed crontab:
-  # `* * * * * php vendor/bin/deploy-report-run`, from the app root. Like a
+  # `cd "$APP_ROOT" && php vendor/bin/deploy-report-run` every minute. Like a
   # cron job, it gets no environment variables: the app reads them from the
   # .env file a platform writes into the app root.
   cron:

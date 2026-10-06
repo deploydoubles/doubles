@@ -1,2 +1,10 @@
-# The one scheduled job: run the deploy report checks every minute, from the app root.
-* * * * * php vendor/bin/deploy-report-run
+# The one scheduled job: run the deploy report checks every minute, from the
+# app root (the directory that holds vendor/). Cron starts a job in the
+# user's home directory, so the job changes to APP_ROOT first. Set APP_ROOT
+# above the job when installing this crontab; on a releases/current layout,
+# point it at the `current` link so every run uses the live release:
+#
+#   APP_ROOT=/path/to/app/current
+#
+# Unset, the job fails loudly instead of running somewhere else.
+* * * * * cd "${APP_ROOT:?set APP_ROOT to the app root}" && php vendor/bin/deploy-report-run
