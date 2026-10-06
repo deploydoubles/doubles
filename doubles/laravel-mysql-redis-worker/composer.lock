@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "885011423e4ced6ed89fe11c68371141",
+    "content-hash": "ba5e090194c745b74cb32d9a2b885f29",
     "packages": [
         {
             "name": "brick/math",
@@ -139,6 +139,78 @@
                 }
             ],
             "time": "2026-09-06T14:11:38+00:00"
+        },
+        {
+            "name": "deploydoubles/checks-php",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/deploydoubles/checks-php.git",
+                "reference": "2d9fa3b33387c5d55cc460b6d020707ddc716fdd"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/deploydoubles/checks-php/zipball/2d9fa3b33387c5d55cc460b6d020707ddc716fdd",
+                "reference": "2d9fa3b33387c5d55cc460b6d020707ddc716fdd",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "php": ">=8.2"
+            },
+            "require-dev": {
+                "doctrine/dbal": "^4.0",
+                "orchestra/testbench": "^10.0 || ^11.0",
+                "pestphp/pest": "^4.0 || ^5.0",
+                "symfony/framework-bundle": "^7.4 || ^8.0",
+                "symfony/messenger": "^7.4 || ^8.0"
+            },
+            "bin": [
+                "bin/deploy-report-run"
+            ],
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "DeployDoubles\\Checks\\Laravel\\DeployReportServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "files": [
+                    "bootstrap.php"
+                ],
+                "psr-4": {
+                    "DeployDoubles\\Checks\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Jan Peter Wiersma"
+                },
+                {
+                    "name": "Deploy Doubles contributors",
+                    "homepage": "https://github.com/deploydoubles/doubles/graphs/contributors"
+                }
+            ],
+            "description": "Generates the Deploy Doubles deploy report (/.well-known/deploy-report) for PHP applications.",
+            "homepage": "https://github.com/deploydoubles/checks-php",
+            "keywords": [
+                "deploy",
+                "deploy-report",
+                "health",
+                "laravel",
+                "symfony",
+                "verification"
+            ],
+            "support": {
+                "source": "https://github.com/deploydoubles/checks-php/tree/v0.1.0"
+            },
+            "time": "2026-10-06T09:55:17+00:00"
         },
         {
             "name": "dflydev/dot-access-data",
