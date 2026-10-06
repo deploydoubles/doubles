@@ -12,3 +12,5 @@ Authored by Jan Peter Wiersma. Licensed under [CC BY 4.0](LICENSE).
 JSON Schemas (2020-12): [`schema/report-v0.1.json`](schema/report-v0.1.json), [`schema/manifest-v0.1.json`](schema/manifest-v0.1.json). Examples are in [`examples/`](examples/).
 
 v0.x is a draft: breaking changes are allowed until 1.0, and proposals are discussed in the open in the `deploydoubles/doubles` repository.
+
+> Developed in the [`deploydoubles/doubles`](https://github.com/deploydoubles/doubles) monorepo under `spec/`. The `deploydoubles/spec` repository is a read-only mirror; open issues and pull requests in the monorepo.

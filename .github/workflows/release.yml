@@ -1,0 +1,83 @@
+# Tag-driven publishing. Nothing is ever published from a local machine.
+#
+#   verifier-v<version>    -> npm package "deploydoubles"     (needs org secret NPM_TOKEN)
+#   checks-php-v<version>  -> tag v<version> on deploydoubles/checks-php; Packagist
+#                             picks it up through its GitHub hook (needs SPLIT_TOKEN)
+#
+# A missing secret fails the job and publishes nothing.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'verifier-v*'
+      - 'checks-php-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    if: startsWith(github.ref_name, 'verifier-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    defaults:
+      run:
+        working-directory: verifier
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#verifier-v}"
+          declared=$(node -p "require('./package.json').version")
+          [ "$version" = "$declared" ] || { echo "::error::tag $TAG does not match verifier/package.json version $declared"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          [ -n "$NODE_AUTH_TOKEN" ] || { echo "::error::The NPM_TOKEN organisation secret is not set; nothing was published."; exit 1; }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+      - run: npm publish --provenance --access public
+
+  checks-php:
+    if: startsWith(github.ref_name, 'checks-php-v')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check the tag
+        run: |
+          version="${TAG#checks-php-v}"
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::$TAG is not a semantic version"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          [ -n "$GH_TOKEN" ] || { echo "::error::The SPLIT_TOKEN organisation secret is not set; nothing was tagged."; exit 1; }
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Test the library
+        working-directory: checks/php
+        run: composer install --no-interaction --no-progress && vendor/bin/pest
+      - name: Tag the split repository
+        run: |
+          version="${TAG#checks-php-v}"
+          sha=$(git subtree split --prefix=checks/php HEAD)
+          git push "https://x-access-token:${GH_TOKEN}@github.com/deploydoubles/checks-php.git" "$sha:refs/tags/v$version"
+          echo "deploydoubles/checks-php v$version -> $sha"

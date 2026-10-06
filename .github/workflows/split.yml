@@ -1,0 +1,116 @@
+# Mirrors folders of this monorepo into read-only repositories with the app at
+# the root, so every double deploys from a plain repository URL.
+#
+#   doubles/<id> -> deploydoubles/<id>        (branches main and rollback-base)
+#   spec         -> deploydoubles/spec
+#   checks/php   -> deploydoubles/checks-php
+#
+# This workflow is the only writer to the split repositories. Never commit in
+# them directly: a split push is a fast-forward and fails if they diverge.
+#
+# Needs the org secret SPLIT_TOKEN: a fine-grained token with repository
+# administration (to create a split repository on first run) and contents
+# write on the deploydoubles organisation.
+
+name: split
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: split
+  cancel-in-progress: false
+
+env:
+  ORG: deploydoubles
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        name: List split targets
+        run: |
+          {
+            echo '{"prefix":"spec","repo":"spec","kind":"spec"}'
+            echo '{"prefix":"checks/php","repo":"checks-php","kind":"library"}'
+            for manifest in doubles/*/double.json; do
+              id=$(basename "$(dirname "$manifest")")
+              echo "{\"prefix\":\"doubles/$id\",\"repo\":\"$id\",\"kind\":\"double\"}"
+            done
+          } | jq -cs . | sed 's/^/targets=/' >> "$GITHUB_OUTPUT"
+
+  split:
+    needs: targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
+    env:
+      GH_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+      PREFIX: ${{ matrix.target.prefix }}
+      REPO: ${{ matrix.target.repo }}
+      KIND: ${{ matrix.target.kind }}
+    steps:
+      - name: Require the split token
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The SPLIT_TOKEN organisation secret is not set; nothing was split."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create the read-only repository on first split
+        run: |
+          if ! gh repo view "$ORG/$REPO" >/dev/null 2>&1; then
+            gh repo create "$ORG/$REPO" --public \
+              --description "Read-only mirror of $PREFIX in $ORG/doubles. Open issues and pull requests there." \
+              --disable-issues --disable-wiki
+          fi
+
+      - name: Split
+        id: split
+        run: |
+          sha=$(git subtree split --prefix="$PREFIX" HEAD)
+          echo "main=$sha" >> "$GITHUB_OUTPUT"
+          echo "Split $PREFIX -> $sha"
+
+      - name: Push main
+        env:
+          MAIN: ${{ steps.split.outputs.main }}
+        run: |
+          git push "https://x-access-token:${GH_TOKEN}@github.com/$ORG/$REPO.git" "$MAIN:refs/heads/main"
+
+      # rollback-base is a synthetic commit with exactly main's tree and main as
+      # its parent: always deployable, always a different commit from main.
+      # (Not main~1: the first split's main~1 may hold no app at all.)
+      - name: Push rollback-base
+        if: matrix.target.kind == 'double'
+        env:
+          MAIN: ${{ steps.split.outputs.main }}
+          GIT_AUTHOR_NAME: deploydoubles split
+          GIT_AUTHOR_EMAIL: split@deploydoubles.invalid
+          GIT_COMMITTER_NAME: deploydoubles split
+          GIT_COMMITTER_EMAIL: split@deploydoubles.invalid
+        run: |
+          tree=$(git rev-parse "$MAIN^{tree}")
+          base=$(git commit-tree "$tree" -p "$MAIN" -m "rollback base for $MAIN")
+          if [ "$base" = "$MAIN" ] || [ "$(git rev-parse "$base^{tree}")" != "$tree" ] || [ "$(git rev-parse "$base^")" != "$MAIN" ]; then
+            echo "::error::rollback-base must be a different commit with main's tree and main as its parent"
+            exit 1
+          fi
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/$ORG/$REPO.git" "$base:refs/heads/rollback-base"
+          echo "rollback-base -> $base (tree $tree, parent $MAIN)"

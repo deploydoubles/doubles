@@ -1,0 +1,62 @@
+# Every night, start every double with Docker Compose and verify it, so a
+# rotten fixture is noticed before anyone mistakes it for a platform bug.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  doubles:
+    runs-on: ubuntu-latest
+    outputs:
+      doubles: ${{ steps.list.outputs.doubles }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        run: |
+          echo "doubles=$(find doubles -mindepth 2 -maxdepth 2 -name double.json -exec dirname {} \; | xargs -n1 basename | sort | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+
+  conformance:
+    needs: doubles
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        double: ${{ fromJSON(needs.doubles.outputs.doubles) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build the verifier
+        run: npm ci && npm run build
+        working-directory: verifier
+      - name: Conformance
+        run: scripts/conformance.sh "${{ matrix.double }}"
+
+  # Reserved: once catalog.json exists (written by scripts/build-catalog), a red
+  # double gets "broken": true there on main. Until then the run only fails.
+  mark-broken:
+    needs: conformance
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Mark broken doubles in catalog.json
+        run: |
+          if [ ! -f catalog.json ]; then
+            echo "catalog.json does not exist yet; nothing to mark. See the failed conformance jobs."
+            exit 1
+          fi
+          echo "::error::catalog.json exists but marking broken doubles is not implemented yet."
+          exit 1
