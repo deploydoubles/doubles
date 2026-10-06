@@ -22,7 +22,7 @@ When it is unclear which tier a field belongs to, it belongs to the full tier.
 - The token is a shared secret the deployer sets in the application's environment as `DEPLOY_REPORT_TOKEN`.
 - It MUST be at least **32 characters**. A configured token shorter than that MUST be ignored: the application serves the public tier only and logs a warning.
 - It MUST be accepted only in the `Authorization: Bearer <token>` request header. A token in the URL (query string or path) MUST be ignored.
-- It MUST be compared in constant time (`hash_equals`, `crypto.timingSafeEqual` or equivalent). It MUST NOT be compared with `==`, `===` or a string equality that returns early.
+- It MUST be compared in constant time (`hash_equals`, `crypto.timingSafeEqual` or equivalent). It MUST NOT be compared with `==`, `===` or a string equality that returns early. Constant time means independent of the token's content; a comparison MAY reveal the configured token's length, which at 32 characters or more is no useful hint.
 - A missing or wrong token MUST NOT produce an error response: the application serves the public tier, with the same HTTP status the public tier would have.
 - No token configured means the public tier only. Detail is opt-in.
 
@@ -60,6 +60,10 @@ The verifier sends the run ID in the request header `Deploy-Run-Id`. The applica
 ## The endpoint only reads
 
 A request to the report MUST only read stored results. It MUST NOT run a check, dispatch work, or write to any service it checks, so that request volume can never turn into load on the database, cache or queue. Checks run on the application's schedule. See [report → scheduled checks](report.md#scheduled-checks-stored-results).
+
+## Verifiers
+
+A verifier holds the token and the run ID, and reads text an application wrote. It MUST NOT send the token over plain `http://` to a host other than a loopback address, MUST NOT send `Authorization` or `Deploy-Run-Id` to an origin other than the one it was given (it follows redirects only within that origin), and MUST NOT print a report's free text. See [outside checks → verifying a deploy](outside-checks.md#verifying-a-deploy).
 
 ## Not a liveness probe
 

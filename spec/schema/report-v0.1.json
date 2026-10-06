@@ -45,6 +45,7 @@
         "database_missing",
         "database_migrations_pending",
         "database_write_failed",
+        "database_write_unsupported",
         "database_engine_mismatch",
         "database_error",
         "cache_unreachable",
@@ -58,6 +59,7 @@
         "scheduler_not_running",
         "scheduler_results_stale",
         "scheduler_release_mismatch",
+        "report_store_unwritable",
         "storage_not_writable",
         "storage_error",
         "assets_missing",
@@ -80,7 +82,8 @@
     "fullCheck": {
       "type": "object",
       "required": [
-        "status"
+        "status",
+        "checked_at"
       ],
       "additionalProperties": false,
       "properties": {
@@ -94,7 +97,8 @@
           "$ref": "#/$defs/engineVersion"
         },
         "code": {
-          "$ref": "#/$defs/code"
+          "$ref": "#/$defs/code",
+          "description": "On fail or warn; a skip may carry one to say why (e.g. database_write_unsupported)."
         },
         "detail": {
           "type": "string",
@@ -110,7 +114,8 @@
           "maximum": 600
         },
         "checked_at": {
-          "$ref": "#/$defs/timestamp"
+          "$ref": "#/$defs/timestamp",
+          "description": "When the evidence behind the result was produced: the scheduled run, or the stored record a result derived at read time rests on. Never the time of the request, except for a pending result."
         }
       }
     },
@@ -195,7 +200,8 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/fullCheck"
-              }
+              },
+              "description": "queue.release is fail with queue_no_worker when no worker answered in time, and skip when the queue check itself failed."
             },
             "app": {
               "type": "object",
@@ -246,7 +252,8 @@
                     {
                       "type": "null"
                     }
-                  ]
+                  ],
+                  "description": "When this release was first seen running; resets when a release comes back (a rollback or a redeploy of a commit that ran before)."
                 },
                 "run_id_match": {
                   "type": [
