@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy Doubles — deployed is not the same as working</title>
+<meta name="description" content="An open standard and a set of reference apps for answering one question: did this deploy actually work?">
+<meta property="og:title" content="Deploy Doubles">
+<meta property="og:description" content="Deployed is not the same as working.">
+<meta property="og:image" content="https://deploydoubles.dev/assets/stunt-pass.png">
+<link rel="icon" href="assets/dub.png">
+<style>
+  :root { --paper: #F4F1EA; --ink: #141414; --orange: #FF5F00; --muted: #5c5a55; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main, footer { max-width: 60rem; margin: 0 auto; padding: 0 1.5rem; }
+  a { color: var(--ink); text-decoration-color: var(--orange); text-underline-offset: 3px; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+  pre { background: var(--ink); color: var(--paper); padding: 1rem 1.25rem; overflow-x: auto; border-radius: 4px; }
+  h1 { font-size: clamp(2.2rem, 6vw, 3.6rem); line-height: 1.05; margin: 0 0 1rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.5rem; margin: 3.5rem 0 1rem; }
+  .eyebrow { font-weight: 700; color: var(--orange); text-transform: uppercase; letter-spacing: .08em; font-size: .8rem; margin: 3rem 0 .75rem; }
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 2rem; align-items: center; }
+  .cast { display: flex; gap: .5rem; }
+  .cast img { width: 170px; height: auto; }
+  .lede { font-size: 1.2rem; max-width: 36rem; }
+  .steps { counter-reset: step; list-style: none; padding: 0; display: grid; gap: 1.25rem; }
+  .steps li { counter-increment: step; padding-left: 3rem; position: relative; }
+  .steps li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 2rem; height: 2rem; border-radius: 50%; background: var(--ink); color: var(--paper); display: grid; place-items: center; font-weight: 700; }
+  .stunts { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1.5rem; }
+  .stunts figure { margin: 0; }
+  .stunts img { width: 100%; height: auto; }
+  .stunts figcaption { font-weight: 600; }
+  .stunts figcaption span { display: block; font-weight: 400; color: var(--muted); font-size: .9rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+  @media (min-width: 40rem) { td:first-child { white-space: nowrap; } }
+  th, td { text-align: left; padding: .5rem .75rem .5rem 0; border-bottom: 1px solid #d9d4c8; vertical-align: top; }
+  .note { color: var(--muted); font-size: .95rem; max-width: 40rem; }
+  footer { margin-top: 4rem; padding-top: 1.5rem; padding-bottom: 3rem; border-top: 2px solid var(--ink); font-size: .9rem; }
+  @media (max-width: 40rem) { .hero { grid-template-columns: 1fr; } .cast img { width: 100px; } }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Deploy Doubles · spec v0.1 draft</p>
+  <section class="hero">
+    <div>
+      <h1>Deployed is not the same as working.</h1>
+      <p class="lede">An open standard and a set of reference apps for answering one question: <em>did this deploy actually work?</em></p>
+    </div>
+    <div class="cast" aria-hidden="true">
+      <img src="assets/dub.png" alt="" width="640" height="960">
+      <img src="assets/vera.png" alt="" width="640" height="960">
+    </div>
+  </section>
+
+  <p>A platform can report a deploy as successful while the app behind it is broken: the new release never took over, the queue worker is still running last week's code, the cache silently fell back to the filesystem, the scheduler never started. Deploy Doubles makes those failures visible, from the inside and from the outside, as one exit code.</p>
+
+  <h2>Three steps</h2>
+  <ol class="steps">
+    <li><strong>Pick a double</strong> that matches what you want to test, and read its <code>double.json</code> to see what it needs.
+      <pre>npx deploydoubles list --needs postgres,worker</pre></li>
+    <li><strong>Deploy it</strong> on any platform, the way you would deploy your own app.</li>
+    <li><strong>Verify it.</strong> Exit <code>0</code> means every check passed on the release you deployed. Anything else comes with a hint for each failing check.
+      <pre>npx deploydoubles verify https://your-deploy.example --commit &lt;deployed sha&gt; --json</pre></li>
+  </ol>
+
+  <h2>Meet Dub and Vera</h2>
+  <p>Dub is the double: it stands in for your app and takes the falls. Vera is the verifier: watching from the outside, stopwatch and clipboard in hand.</p>
+  <div class="stunts">
+    <figure><img src="assets/stunt-boot.png" alt="Dub slumped in a doorway while Vera marks a fail" width="700" height="760"><figcaption>It deployed. It never stood up.<span>The platform said success. The new release never took over.</span></figcaption></figure>
+    <figure><img src="assets/stunt-rollback.png" alt="Dub yanked back along a rewind trail" width="700" height="760"><figcaption>Back to the last release. Nobody saw a thing.<span>A rollback should be just as verifiable as a deploy.</span></figcaption></figure>
+    <figure><img src="assets/stunt-pass.png" alt="Dub standing with fists on hips while Vera ticks her clipboard" width="700" height="760"><figcaption>Deployed is not the same as working. This one is both.<span>Every check passed, on the release you deployed.</span></figcaption></figure>
+  </div>
+
+  <h2>The standard</h2>
+  <ul>
+    <li><strong>The report</strong> an app serves about itself at <code>/.well-known/deploy-report</code> — <a href="https://github.com/deploydoubles/doubles/blob/main/spec/report.md">report.md</a>, schema <a href="schema/report-v0.1.json">report-v0.1.json</a></li>
+    <li><strong>The manifest</strong> (<code>double.json</code>) of what an app needs — <a href="https://github.com/deploydoubles/doubles/blob/main/spec/manifest.md">manifest.md</a>, schema <a href="schema/manifest-v0.1.json">manifest-v0.1.json</a></li>
+    <li><strong>Outside checks</strong> a verifier runs, and its exit codes — <a href="https://github.com/deploydoubles/doubles/blob/main/spec/outside-checks.md">outside-checks.md</a></li>
+    <li><strong>Security</strong>: the two tiers, the token, and what a report never contains — <a href="https://github.com/deploydoubles/doubles/blob/main/spec/security.md">security.md</a></li>
+  </ul>
+  <p>Any app can implement the report. In PHP use <a href="https://packagist.org/packages/deploydoubles/checks-php"><code>deploydoubles/checks-php</code></a>; in Node use <a href="https://www.npmjs.com/package/@deploydoubles/checks"><code>@deploydoubles/checks</code></a>. The verifier is <a href="https://www.npmjs.com/package/deploydoubles"><code>deploydoubles</code></a> on npm.</p>
+
+  <h2>The doubles</h2>
+  <p>Small reference apps, one per framework and service combination, that implement the standard exactly and exist to be deployed. Each one is a plain repository any platform can deploy from. The full list is machine-readable at <a href="catalog.json">catalog.json</a>.</p>
+  <table id="doubles">
+    <thead><tr><th>Double</th><th>What it is</th></tr></thead>
+    <tbody><tr><td colspan="2"><a href="catalog.json">catalog.json</a></td></tr></tbody>
+  </table>
+
+  <h2>How this is built</h2>
+  <p class="note">Deploy Doubles is authored by Jan Peter Wiersma. Most of the code and text is drafted by AI agents under his direction and review: agent-written commits carry a <code>Co-Authored-By</code> trailer, and he is accountable for every line that is merged. A standard built for agents, built mostly by agents, with a human accountable for it. Agents can start at <a href="llms.txt">llms.txt</a>.</p>
+</main>
+<footer>
+  <a href="https://github.com/deploydoubles/doubles">GitHub</a> · Code MIT · Spec text CC BY 4.0 · v0.1 is a draft; breaking changes are allowed until 1.0.<br>
+  Started and stewarded by <a href="https://strackt.io">Strackt</a>.
+</footer>
+<script>
+fetch('catalog.json').then(r => r.json()).then(c => {
+  const body = document.querySelector('#doubles tbody');
+  body.replaceChildren(...c.doubles.map(d => {
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    const link = document.createElement('a');
+    link.href = d.repository || 'https://github.com/deploydoubles/' + d.id;
+    link.textContent = d.id;
+    name.append(link);
+    if (d.broken) name.append(' (broken)');
+    const desc = document.createElement('td');
+    desc.textContent = d.description;
+    tr.append(name, desc);
+    return tr;
+  }));
+}).catch(() => {});
+</script>
+</body>
+</html>

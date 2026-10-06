@@ -1,0 +1,26 @@
+# Deploy Doubles
+
+> An open standard and a set of reference apps for answering one question: did this deploy actually work? An app serves a report about itself at `/.well-known/deploy-report`; a verifier (`npx deploydoubles verify <url> --commit <sha> --json`) reads it, runs outside checks and exits 0 (every check passed on the deployed release), 1, 2 or 3. Spec v0.1 is a draft; breaking changes are allowed until 1.0.
+
+The doubles are small reference apps, one per framework and service combination, that implement the standard exactly and exist to be deployed. Each double's `double.json` manifest lists the services, processes and environment it needs; `catalog.json` lists every double and whether it is currently broken.
+
+## Specification
+
+- [Report](https://github.com/deploydoubles/doubles/blob/main/spec/report.md): the report an application serves at `/.well-known/deploy-report`
+- [Security](https://github.com/deploydoubles/doubles/blob/main/spec/security.md): the two tiers, the token, and what a report never contains
+- [Outside checks](https://github.com/deploydoubles/doubles/blob/main/spec/outside-checks.md): what a verifier observes from outside, and its exit codes
+- [Manifest](https://github.com/deploydoubles/doubles/blob/main/spec/manifest.md): `double.json`, what an application needs and which checks must pass
+- [Report schema v0.1](https://deploydoubles.dev/schema/report-v0.1.json): JSON Schema 2020-12
+- [Manifest schema v0.1](https://deploydoubles.dev/schema/manifest-v0.1.json): JSON Schema 2020-12
+
+## Doubles and tools
+
+- [catalog.json](https://deploydoubles.dev/catalog.json): every double's manifest, repository and broken status
+- [deploydoubles on npm](https://www.npmjs.com/package/deploydoubles): the verifier CLI (`list`, `verify`)
+- [deploydoubles/checks-php](https://packagist.org/packages/deploydoubles/checks-php): generates the report in Laravel, Symfony and plain PHP apps
+- [@deploydoubles/checks](https://www.npmjs.com/package/@deploydoubles/checks): generates the report in Node apps
+
+## Optional
+
+- [Monorepo](https://github.com/deploydoubles/doubles): where changes are made; the spec, check libraries and doubles are mirrored to read-only repositories
+- [Examples](https://github.com/deploydoubles/doubles/tree/main/spec/examples): example reports and a manifest
