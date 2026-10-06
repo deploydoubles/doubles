@@ -75,6 +75,8 @@ npx deploydoubles list --needs postgres,worker --json
 
 The catalog is read from `https://raw.githubusercontent.com/deploydoubles/doubles/main/catalog.json` unless `--catalog` names a file or URL. A double whose own nightly conformance run fails carries `"broken": true`. Exit `0` with a list (possibly empty); exit `3` when the catalog cannot be read.
 
+The catalog is remote input, read like a report. Only `https://` is fetched (`http://` only on a loopback address); redirects are followed within the same origin only; the body is read up to 1 MB. An entry is dropped unless its `repository` is exactly `https://github.com/deploydoubles/<id>`; a service, process, runtime or framework name that does not match the manifest schema's name pattern is dropped; and control, bidirectional and zero-width characters are stripped from the description, in human and `--json` output alike.
+
 ## Licence
 
 MIT. Developed in the [`deploydoubles/doubles`](https://github.com/deploydoubles/doubles) monorepo.

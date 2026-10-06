@@ -45,3 +45,38 @@ export function reportUrl(base: string): URL {
   url.hash = '';
   return url;
 }
+
+export type Fetch = typeof globalThis.fetch;
+
+export type SameOriginFetch =
+  | { kind: 'response'; response: Response }
+  /** A redirect to another origin; it was not followed. */
+  | { kind: 'cross-origin-redirect'; httpStatus: number }
+  /** A redirect without a usable Location, or one hop too many. */
+  | { kind: 'bad-redirect'; httpStatus: number };
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+/**
+ * Fetches a URL, following redirects only within the origin it was given, so headers (a token, a
+ * run ID) and trust in the response never move to another origin. Network errors throw.
+ */
+export async function fetchSameOrigin(fetchImpl: Fetch, url: URL, init: Omit<RequestInit, 'redirect'> = {}): Promise<SameOriginFetch> {
+  let target = url;
+  for (let hop = 0; ; hop++) {
+    const response = await fetchImpl(target, { ...init, redirect: 'manual' });
+    if (!REDIRECTS.has(response.status)) return { kind: 'response', response };
+    const location = response.headers.get('location');
+    await response.body?.cancel().catch(() => undefined);
+    if (!location || hop >= MAX_REDIRECTS) return { kind: 'bad-redirect', httpStatus: response.status };
+    let next: URL;
+    try {
+      next = new URL(location, target);
+    } catch {
+      return { kind: 'bad-redirect', httpStatus: response.status };
+    }
+    if (next.origin !== url.origin) return { kind: 'cross-origin-redirect', httpStatus: response.status };
+    target = next;
+  }
+}

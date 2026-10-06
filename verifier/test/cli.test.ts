@@ -77,4 +77,21 @@ describe.skipIf(!built && !process.env.CI)('cli (built)', () => {
     expect(code).toBe(3);
     expect(JSON.parse(stdout)).toMatchObject({ doubles: [] });
   });
+
+  it('prints a hostile catalog without terminal escapes or foreign repositories, in both modes', async () => {
+    const catalog = new URL('./fixtures/catalog-hostile.json', import.meta.url).pathname;
+    const unsafe = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+    const human = await cli(['list', '--catalog', catalog]);
+    const json = await cli(['list', '--json', '--catalog', catalog]);
+
+    for (const { code, stdout, stderr } of [human, json]) {
+      expect(code).toBe(0);
+      expect(stderr).toBe('');
+      expect(stdout).not.toMatch(unsafe);
+      expect(stdout).not.toContain('\\u001b');
+      expect(stdout).not.toContain('\\u202e');
+    }
+    expect(human.stdout).not.toContain('attacker');
+    expect(JSON.parse(json.stdout).doubles.map((d: { repository: string }) => d.repository)).toEqual(['https://github.com/deploydoubles/hostile-but-ours']);
+  });
 });
