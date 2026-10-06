@@ -24,26 +24,43 @@ if (! function_exists(__NAMESPACE__.'\serve')) {
     /**
      * Answers the current request with the stored report. Only reads the
      * store and filters by tier: no checks, no database access.
+     *
+     * Whatever fails while answering — a broken deploy-report.php, an
+     * unreadable store — the response is a fixed, failed public-tier report
+     * with status 503, and display_errors is off for the duration: no
+     * message, path or trace of the failure can reach the response.
      */
     function serve(?string $appRoot = null): void
     {
-        $standalone = StandaloneConfig::load($appRoot ?? appRoot());
-        $config = $standalone->config;
-        $commit = (new CommitResolver($standalone->appRoot))->resolve();
+        $displayErrors = ini_get('display_errors');
+        ini_set('display_errors', '0');
+        try {
+            $standalone = StandaloneConfig::load($appRoot ?? appRoot());
+            $config = $standalone->config;
+            $commit = (new CommitResolver($standalone->appRoot))->resolve();
 
-        $report = (new ReportReader(new FileStore($config->storePath), $config, $commit))->read();
-        $filter = new TierFilter($config);
-        $body = $filter->apply(
-            $report->toArray(),
-            $filter->decide(requestHeader('Authorization')),
-            RunIdMatcher::match($config->runId, requestHeader(RunIdMatcher::HEADER)),
-        );
+            $report = (new ReportReader(new FileStore($config->storePath), $config, $commit))->read();
+            $filter = new TierFilter($config);
+            $body = json_encode($filter->apply(
+                $report->toArray(),
+                $filter->decide(requestHeader('Authorization')),
+                RunIdMatcher::match($config->runId, requestHeader(RunIdMatcher::HEADER)),
+            ), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+            $status = $report->httpStatus();
+        } catch (\Throwable $error) {
+            // The class only, never the message: "check the app's logs" stays true without leaking.
+            error_log('deploy-report: the report could not be served ('.$error::class.').');
+            $body = '{"status":"fail","deploy":{"spec_version":"0.1","tier":"public","settled":true,"checks":{}}}';
+            $status = 503;
+        } finally {
+            ini_set('display_errors', $displayErrors === false ? '' : $displayErrors);
+        }
 
-        http_response_code($report->httpStatus());
+        http_response_code($status);
         foreach (Report::headers() as $name => $value) {
             header($name.': '.$value);
         }
-        echo json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        echo $body;
     }
 
     /**

@@ -34,6 +34,8 @@ it('maps database errors by SQLSTATE and driver code only', function (PDOExcepti
     'unknown db' => [fn () => pdoError('42000', 1049, "Unknown database 'leaky_db'"), Codes::DATABASE_MISSING],
     'pg missing db' => [fn () => pdoError('3D000', 7, 'FATAL: database "leaky_db" does not exist'), Codes::DATABASE_MISSING],
     'pg auth' => [fn () => pdoError('28P01', 7, 'password authentication failed for user "leaky_user"'), Codes::DATABASE_AUTH_FAILED],
+    'pg starting up' => [fn () => pdoError('57P03', 7, 'FATAL: the database system is starting up (leaky_db)'), Codes::DATABASE_UNREACHABLE],
+    'pg connect timeout' => [fn () => pdoError('08006', 7, 'timeout expired for leaky_user@db.internal.example'), Codes::DATABASE_UNREACHABLE],
     'other' => [fn () => pdoError('HY000', 9999, 'something about leaky_user'), Codes::DATABASE_ERROR],
 ]);
 

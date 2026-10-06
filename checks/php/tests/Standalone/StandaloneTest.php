@@ -134,6 +134,68 @@ it('serves the public tier without a token, and the full tier with a valid one',
         ->and($full['json']['deploy']['release']['run_id_match'])->toBeNull();
 });
 
+it('ignores a token in the query string', function () {
+    $_SERVER['DEPLOY_REPORT_TOKEN'] = PLAIN_TOKEN;
+    ($this->config)("return ['checks' => ['scheduler' => []]];");
+    run($this->root);
+
+    $savedGet = $_GET;
+    $_GET = ['token' => PLAIN_TOKEN, 'access_token' => PLAIN_TOKEN];
+    try {
+        $response = ($this->serve)([
+            'QUERY_STRING' => 'token='.PLAIN_TOKEN.'&access_token='.PLAIN_TOKEN,
+            'REQUEST_URI' => '/.well-known/deploy-report?token='.PLAIN_TOKEN,
+        ]);
+    } finally {
+        $_GET = $savedGet;
+    }
+
+    expect($response['json']['deploy']['tier'])->toBe('public')
+        ->and($response['json']['deploy'])->not->toHaveKey('release');
+});
+
+it('answers a fixed 503 when the report cannot be served, with display_errors off meanwhile and restored after', function () {
+    ($this->config)(<<<'PHP'
+        $GLOBALS['dd_display_errors_inside'] = ini_get('display_errors');
+        throw new RuntimeException('leaky_user@db.internal.example:3306 /var/www/secret');
+        PHP);
+    $saved = ini_get('display_errors');
+    ini_set('display_errors', '1');
+    try {
+        $response = ($this->serve)();
+        $after = ini_get('display_errors');
+    } finally {
+        ini_set('display_errors', $saved === false ? '' : $saved);
+    }
+
+    expect($response['status'])->toBe(503)
+        ->and($response['body'])->toBe('{"status":"fail","deploy":{"spec_version":"0.1","tier":"public","settled":true,"checks":{}}}')
+        ->and($GLOBALS['dd_display_errors_inside'])->toBe('0')
+        ->and($after)->toBe('1');
+});
+
+it('prints no error text into the response, even with display_errors on in php.ini', function () {
+    // A real PHP process: PHPUnit's own error handler would hide a displayed warning in-process.
+    file_put_contents($this->root.'/deploy-report.php', <<<'PHP'
+        <?php
+        echo $leaky_undefined_variable;
+        trigger_error('leaky_user@db.internal.example', E_USER_WARNING);
+        throw new RuntimeException('leaky_user@db.internal.example /var/www/secret');
+        PHP);
+    $script = sprintf(
+        'require %s; DeployDoubles\Checks\serve(%s); echo "\n", http_response_code(), "|", ini_get("display_errors");',
+        var_export(realpath(__DIR__.'/../../vendor/autoload.php'), true),
+        var_export($this->root, true),
+    );
+    $process = proc_open([PHP_BINARY, '-d', 'display_errors=1', '-d', 'log_errors=0', '-r', $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $stdout = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($process);
+
+    expect($stdout)->toBe('{"status":"fail","deploy":{"spec_version":"0.1","tier":"public","settled":true,"checks":{}}}'."\n503|1");
+});
+
 it('reports a forced database error as a fixed code with no username, host or DSN', function () {
     ($this->config)(<<<'PHP'
         return [

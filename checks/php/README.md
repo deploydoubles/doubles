@@ -52,6 +52,8 @@ deploy_report:
         env: { required: [APP_SECRET] }
 ```
 
+The `tier` guard has a limit: it rejects `%env()%` placeholders, which is what a YAML or XML file can use to read the environment. A configuration written in PHP (`config/packages/deploy_report.php`) that calls `getenv()` or reads `$_SERVER` while the container is built hands the bundle a plain `"full"` or `"public"`, which it cannot tell apart from a literal. Keep `deploy_report` in YAML with `tier` written out; the reference doubles' tests check exactly that, in their committed YAML only.
+
 `token` and `run_id` default to `DEPLOY_REPORT_TOKEN` and `DEPLOY_RUN_ID`. Without `checks`, they are inferred from the container (a Doctrine connection, the probe transport). `store_path` and `storage_marker_path` default to `var/deploy-report` and `var/storage/deploy-report`; share both between the web process, the worker and the cron job. The `database` check uses the Doctrine DBAL connection (`connection`, default `default`) and, when DoctrineMigrationsBundle is installed, reports pending migrations.
 
 ## Install (plain PHP)

@@ -91,6 +91,18 @@ it('serves the public tier without a token, and the full tier with a valid one',
         ->and($full['deploy']['release']['commit'])->toBe(SF_COMMIT);
 });
 
+it('ignores a token in the query string', function () {
+    $_SERVER['DEPLOY_REPORT_TOKEN'] = SF_TOKEN;
+    $kernel = ($this->kernel)(['checks' => ['scheduler' => []]]);
+    ($this->run)($kernel);
+
+    $response = $kernel->handle(Request::create('/.well-known/deploy-report?token='.SF_TOKEN.'&access_token='.SF_TOKEN));
+    $body = json_decode((string) $response->getContent(), true);
+
+    expect($body['deploy']['tier'])->toBe('public')
+        ->and($body['deploy'])->not->toHaveKey('release');
+});
+
 it('rejects an environment variable as the tier', function () {
     $_SERVER['DEPLOY_REPORT_TIER'] = 'full';
     ($this->kernel)(['tier' => '%env(DEPLOY_REPORT_TIER)%']);

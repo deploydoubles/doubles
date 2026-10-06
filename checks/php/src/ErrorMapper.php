@@ -66,7 +66,8 @@ final class ErrorMapper
             return match (true) {
                 $sqlState === '3D000' => Codes::DATABASE_MISSING,
                 str_starts_with($sqlState, '28') => Codes::DATABASE_AUTH_FAILED,
-                str_starts_with($sqlState, '08') => Codes::DATABASE_UNREACHABLE,
+                // 57P03: the server is starting up or shutting down, so it did not accept the connection.
+                str_starts_with($sqlState, '08'), $sqlState === '57P03' => Codes::DATABASE_UNREACHABLE,
                 in_array($sqlState, ['42S02', '42P01'], true) => Codes::DATABASE_MIGRATIONS_PENDING,
                 default => Codes::DATABASE_ERROR,
             };

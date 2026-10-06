@@ -32,6 +32,7 @@ An application MAY serve the full tier to every request by setting `tier: full` 
 
 - The tier setting MUST NOT be read from an environment variable or any other value a hosting platform could set by accident.
 - Production applications SHOULD NOT set `tier: full`.
+- An implementation can only enforce this as far as its configuration format lets it see. A YAML or XML file names an environment variable explicitly (Symfony's `%env()%`), and an implementation SHOULD reject that; a configuration file written in a programming language (a PHP or JavaScript config) can read the environment while it is evaluated and hand over a plain string, which no implementation can tell apart from a literal. Implementations SHOULD document which formats their check covers, and reference apps SHOULD commit `tier` in a format whose check they run.
 - Everything in [never include](#never-include) applies to the full tier, always.
 
 ## Never include
