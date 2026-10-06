@@ -1,0 +1,277 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deploydoubles.dev/schema/report-v0.1.json",
+  "title": "Deploy report v0.1",
+  "description": "The report an application serves about itself at /.well-known/deploy-report. The top level is compatible with draft-inadarei-api-health-check-06; everything deploy-specific lives under `deploy`. A response is either the public tier or the full tier.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/publicReport"
+    },
+    {
+      "$ref": "#/$defs/fullReport"
+    }
+  ],
+  "$defs": {
+    "overallStatus": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "checkStatus": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "pending",
+        "skip"
+      ]
+    },
+    "checkName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)?$",
+      "maxLength": 64
+    },
+    "engineVersion": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+( [0-9]+\\.[0-9]+)?$",
+      "maxLength": 64
+    },
+    "code": {
+      "enum": [
+        "database_unreachable",
+        "database_auth_failed",
+        "database_missing",
+        "database_migrations_pending",
+        "database_write_failed",
+        "database_write_unsupported",
+        "database_engine_mismatch",
+        "database_error",
+        "cache_unreachable",
+        "cache_store_mismatch",
+        "cache_roundtrip_failed",
+        "cache_error",
+        "queue_driver_mismatch",
+        "queue_no_worker",
+        "queue_release_mismatch",
+        "queue_error",
+        "scheduler_not_running",
+        "scheduler_results_stale",
+        "scheduler_release_mismatch",
+        "report_store_unwritable",
+        "storage_not_writable",
+        "storage_error",
+        "assets_missing",
+        "env_missing",
+        "check_error"
+      ]
+    },
+    "publicCheck": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/checkStatus"
+        }
+      }
+    },
+    "fullCheck": {
+      "type": "object",
+      "required": [
+        "status",
+        "checked_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "expected": {
+          "$ref": "#/$defs/engineVersion"
+        },
+        "observed": {
+          "$ref": "#/$defs/engineVersion"
+        },
+        "code": {
+          "$ref": "#/$defs/code",
+          "description": "On fail or warn; a skip may carry one to say why (e.g. database_write_unsupported)."
+        },
+        "detail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "hint": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "retry_after": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600
+        },
+        "checked_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "When the evidence behind the result was produced: the scheduled run, or the stored record a result derived at read time rests on. Never the time of the request, except for a pending result."
+        }
+      }
+    },
+    "publicReport": {
+      "type": "object",
+      "required": [
+        "status",
+        "deploy"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/overallStatus"
+        },
+        "deploy": {
+          "type": "object",
+          "required": [
+            "spec_version",
+            "tier",
+            "settled",
+            "checks"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "spec_version": {
+              "const": "0.1"
+            },
+            "tier": {
+              "const": "public"
+            },
+            "settled": {
+              "type": "boolean"
+            },
+            "checks": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/checkName"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/publicCheck"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "fullReport": {
+      "type": "object",
+      "required": [
+        "status",
+        "deploy"
+      ],
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/overallStatus"
+        },
+        "deploy": {
+          "type": "object",
+          "required": [
+            "spec_version",
+            "tier",
+            "settled",
+            "checks",
+            "app",
+            "release"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "spec_version": {
+              "const": "0.1"
+            },
+            "tier": {
+              "const": "full"
+            },
+            "settled": {
+              "type": "boolean"
+            },
+            "checks": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/checkName"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/fullCheck"
+              },
+              "description": "queue.release is fail with queue_no_worker when no worker answered in time, and skip when the queue check itself failed."
+            },
+            "app": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9 ._-]{1,64}$"
+                },
+                "framework": {
+                  "$ref": "#/$defs/engineVersion"
+                },
+                "runtime": {
+                  "$ref": "#/$defs/engineVersion"
+                },
+                "double": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+                  "maxLength": 64
+                }
+              }
+            },
+            "release": {
+              "type": "object",
+              "required": [
+                "commit",
+                "booted_at",
+                "run_id_match"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "commit": {
+                  "oneOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "booted_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/timestamp"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When this release was first seen running; resets when a release comes back (a rollback or a redeploy of a commit that ran before)."
+                },
+                "run_id_match": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$",
+      "description": "RFC 3339 date-time"
+    }
+  }
+}

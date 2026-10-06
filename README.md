@@ -1,5 +1,58 @@
 # Deploy Doubles
 
-An open standard and reference apps for verifying that a deploy actually works.
+[![spec: v0.1 draft](https://img.shields.io/badge/spec-v0.1%20draft-FF5F00?labelColor=141414)](spec/)
+[![code: MIT](https://img.shields.io/badge/code-MIT-F4F1EA?labelColor=141414)](LICENSE)
+[![spec text: CC BY 4.0](https://img.shields.io/badge/spec%20text-CC%20BY%204.0-F4F1EA?labelColor=141414)](spec/LICENSE)
 
-Work in progress.
+**Deployed is not the same as working.**
+
+Deploy Doubles is an open standard and a set of reference apps for answering one question: *did this deploy actually work?*
+
+A platform can report a deploy as successful while the app behind it is broken — the new release never took over, the queue worker is still running last week's code, the cache silently fell back to the filesystem, the scheduler never started. Deploy Doubles makes those failures visible, from the inside and from the outside, as one exit code.
+
+- **The standard** — a [report](spec/report.md) an app serves about itself at `/.well-known/deploy-report`, a [manifest](spec/manifest.md) (`double.json`) of what it needs, and [outside checks](spec/outside-checks.md) a verifier runs. Any app can implement the report.
+- **The doubles** — small reference apps, one per framework and service combination, that implement the standard exactly and exist to be deployed. In testing, a *test double* stands in for a real dependency; a deploy double stands in for your app while you test a deploy.
+- **The verifier** — `npx deploydoubles verify`, which reads the report, runs the outside checks and returns `0`, `1`, `2` or `3`.
+
+## Three steps
+
+1. **Pick a double** that matches what you want to test, and read its `double.json` to see what it needs (services, processes, environment).
+2. **Deploy it** on any platform, the way you would deploy your own app.
+3. **Verify it**:
+
+   ```sh
+   npx deploydoubles verify https://your-deploy.example --commit <deployed sha> --json
+   ```
+
+   Exit `0` means every check passed on the release you deployed. Anything else comes with a hint for each failing check.
+
+## What is in this repository
+
+| Path | What it is |
+|---|---|
+| [`spec/`](spec/) | The specification and its JSON Schemas (CC BY 4.0) |
+| [`verifier/`](verifier/) | The `deploydoubles` CLI (npm) |
+| [`checks/php/`](checks/php/) | `deploydoubles/checks-php` — generates the report in PHP apps (Laravel today) |
+| [`checks/node/`](checks/node/) | Node check library (coming) |
+| [`doubles/`](doubles/) | The reference apps |
+| [`scripts/conformance.sh`](scripts/conformance.sh) | Starts a double with Docker Compose and verifies it |
+
+This is the monorepo. Each double, the spec and the check libraries are also mirrored into read-only repositories under the `deploydoubles` organisation, with the app at the repository root, so any platform can deploy a double from a plain repository URL. Changes are made here.
+
+## Status
+
+v0.1 is a draft. Breaking changes are allowed until 1.0. The project is useful before it is a standard: the doubles and the verifier exist to catch real deploy bugs first.
+
+## How this is built
+
+Deploy Doubles is authored by Jan Peter Wiersma. Most of the code and text is drafted by AI agents under his direction and review: agent-written commits carry a `Co-Authored-By` trailer, and he is accountable for every line that is merged. Contributors are asked to disclose AI assistance in their pull requests — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+A standard built for agents, built mostly by agents, with a human accountable for it.
+
+## Licence
+
+Code is [MIT](LICENSE). The specification text in [`spec/`](spec/) is [CC BY 4.0](spec/LICENSE).
+
+---
+
+Started and stewarded by [Strackt](https://strackt.io). See [GOVERNANCE.md](GOVERNANCE.md).

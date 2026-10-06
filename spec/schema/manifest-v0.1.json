@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deploydoubles.dev/schema/manifest-v0.1.json",
+  "title": "Deploy Doubles manifest (double.json) v0.1",
+  "description": "What a reference app needs and which checks must pass once it is deployed. Platforms must not read this file to configure an app.",
+  "type": "object",
+  "required": ["spec_version", "id", "description", "framework", "runtime", "services", "processes", "env", "expects"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "spec_version": { "const": "0.1" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+    "description": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "framework": { "$ref": "#/$defs/component" },
+    "runtime": { "$ref": "#/$defs/component" },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "database": { "enum": ["mysql", "mariadb", "postgres", "sqlite"] },
+        "cache": { "enum": ["redis", "valkey"] },
+        "queue": { "enum": ["redis", "valkey", "database"] }
+      }
+    },
+    "processes": {
+      "type": "object",
+      "required": ["web"],
+      "additionalProperties": false,
+      "properties": {
+        "web": { "$ref": "#/$defs/process" },
+        "worker": { "$ref": "#/$defs/process" },
+        "scheduler": { "$ref": "#/$defs/process" }
+      }
+    },
+    "env": {
+      "type": "object",
+      "required": ["required"],
+      "additionalProperties": false,
+      "properties": {
+        "required": { "$ref": "#/$defs/envNames" },
+        "generated": { "$ref": "#/$defs/envNames" }
+      }
+    },
+    "build": { "$ref": "#/$defs/commands" },
+    "release": { "$ref": "#/$defs/commands" },
+    "expects": {
+      "type": "object",
+      "required": ["inside", "outside"],
+      "additionalProperties": false,
+      "properties": {
+        "inside": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["database", "cache", "queue", "queue.release", "scheduler", "scheduler.release", "storage", "assets", "env"]
+          }
+        },
+        "outside": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": ["reachability", "tls", "https_redirect", "release", "run_id", "downtime", "rollback", "persistence", "detection"]
+          }
+        }
+      }
+    },
+    "failure_modes": {
+      "type": "array",
+      "maxItems": 0
+    }
+  },
+  "$defs": {
+    "component": {
+      "type": "object",
+      "required": ["name", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "process": {
+      "type": "object",
+      "required": ["command"],
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "envNames": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+    },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+    }
+  }
+}

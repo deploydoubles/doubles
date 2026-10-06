@@ -1,0 +1,100 @@
+# Tag-driven publishing. Nothing is ever published from a local machine.
+#
+#   verifier-v<version>    -> npm package "deploydoubles", with provenance, through npm trusted
+#                             publishing (OIDC). NPM_TOKEN is needed only for the very first publish:
+#                             a trusted publisher can only be configured on a package that exists.
+#   checks-php-v<version>  -> tag v<version> on deploydoubles/checks-php; Packagist picks it up
+#                             through its GitHub hook (needs SPLIT_TOKEN)
+#
+# Both jobs run in the "release" environment, so its protection rules (who may approve, which
+# tags may deploy) gate every publish. Each secret is handed only to the one step that uses it.
+# A missing credential fails that step and publishes nothing.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'verifier-v*'
+      - 'checks-php-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verifier:
+    if: startsWith(github.ref_name, 'verifier-v')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: verifier
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#verifier-v}"
+          declared=$(node -p "require('./package.json').version")
+          [ "$version" = "$declared" ] || { echo "::error::tag $TAG does not match verifier/package.json version $declared"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+      - name: Publish to npm
+        env:
+          # First publish only. Once the trusted publisher is configured on npmjs.com
+          # (repository deploydoubles/doubles, workflow release.yml, environment release),
+          # delete the NPM_TOKEN secret: npm then authenticates with this job's OIDC token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Trusted publishing needs npm 11.5.1 or newer.
+          if [ "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" != 11.5.1 ]; then
+            npm install --global npm@11
+          fi
+          npm publish --provenance --access public
+
+  checks-php:
+    if: startsWith(github.ref_name, 'checks-php-v')
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the tag
+        run: |
+          version="${TAG#checks-php-v}"
+          echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' || { echo "::error::$TAG is not a semantic version"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Test the library
+        working-directory: checks/php
+        run: composer install --no-interaction --no-progress && vendor/bin/pest
+      - name: Tag the split repository
+        env:
+          GH_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::The SPLIT_TOKEN secret is not set; nothing was tagged."; exit 1; }
+          version="${TAG#checks-php-v}"
+          sha=$(git subtree split --prefix=checks/php HEAD)
+          git push "https://x-access-token:${GH_TOKEN}@github.com/deploydoubles/checks-php.git" "$sha:refs/tags/v$version"
+          echo "deploydoubles/checks-php v$version -> $sha"

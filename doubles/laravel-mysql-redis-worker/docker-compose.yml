@@ -1,0 +1,87 @@
+# Reference setup for the conformance run (scripts/conformance.sh).
+# Builds from the monorepo root so the checks library under test is the one
+# in this working tree (MONOREPO=1).
+
+name: dd-laravel-mysql-redis-worker
+
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: doubles/laravel-mysql-redis-worker/docker/Dockerfile
+    args:
+      APP_DIR: doubles/laravel-mysql-redis-worker
+      MONOREPO: "1"
+      REVISION: ${REVISION:-}
+  image: deploydoubles-conformance/laravel-mysql-redis-worker:${DD_IMAGE_TAG:-local}
+  # Settings arrive the way most PHP hosts deliver them: a .env file, not the
+  # process environment, with the configuration cached at startup
+  # (docker/entrypoint.sh). The env check must find APP_KEY anyway.
+  volumes:
+    - storage:/app/storage
+    - ./docker/conformance.env:/app/.env:ro
+
+services:
+  migrate:
+    <<: *app
+    command: ["php", "artisan", "migrate", "--force"]
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    ports:
+      - "${DD_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/up') === false ? 1 : 0);"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  worker:
+    <<: *app
+    command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=1"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: double
+      MYSQL_USER: double
+      MYSQL_PASSWORD: double
+      MYSQL_ROOT_PASSWORD: double-root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-udouble", "-pdouble"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  storage:

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://deploydoubles.dev/schema/manifest-v0.1.json",
+  "spec_version": "0.1",
+  "id": "laravel-mysql-redis-worker",
+  "description": "Laravel with MySQL, Redis for cache and queue, a queue worker and the scheduler.",
+  "framework": { "name": "laravel", "version": "^13.0" },
+  "runtime": { "name": "php", "version": ">=8.3" },
+  "services": { "database": "mysql", "cache": "redis", "queue": "redis" },
+  "processes": {
+    "web": { "command": "php artisan serve --host=0.0.0.0 --port=8080 --no-reload" },
+    "worker": { "command": "php artisan queue:work --sleep=1 --tries=1" },
+    "scheduler": { "command": "php artisan schedule:work" }
+  },
+  "env": { "required": ["APP_KEY"], "generated": ["APP_KEY"] },
+  "build": ["composer install --no-dev --optimize-autoloader"],
+  "release": ["php artisan migrate --force"],
+  "expects": {
+    "inside": ["database", "cache", "queue", "queue.release", "scheduler", "scheduler.release", "storage", "env"],
+    "outside": ["reachability", "tls", "https_redirect", "release", "run_id", "downtime", "rollback", "persistence", "detection"]
+  },
+  "failure_modes": []
+}

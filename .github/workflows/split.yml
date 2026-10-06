@@ -1,0 +1,126 @@
+# Mirrors folders of this monorepo into read-only repositories with the app at
+# the root, so every double deploys from a plain repository URL.
+#
+#   doubles/<id> -> deploydoubles/<id>        (branches main and rollback-base)
+#   spec         -> deploydoubles/spec
+#   checks/php   -> deploydoubles/checks-php
+#
+# This workflow is the only writer to the split repositories. Never commit in
+# them directly: a split push is a fast-forward and fails if they diverge.
+#
+# Needs the org secret SPLIT_TOKEN: a fine-grained token with repository
+# administration (to create a split repository on first run) and contents
+# write on the deploydoubles organisation.
+
+name: split
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: split
+  cancel-in-progress: false
+
+env:
+  ORG: deploydoubles
+
+jobs:
+  targets:
+    # workflow_dispatch can be started on any branch; only main is ever split.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: list
+        name: List split targets
+        run: |
+          {
+            echo '{"prefix":"spec","repo":"spec","kind":"spec"}'
+            echo '{"prefix":"checks/php","repo":"checks-php","kind":"library"}'
+            for manifest in doubles/*/double.json; do
+              id=$(basename "$(dirname "$manifest")")
+              echo "{\"prefix\":\"doubles/$id\",\"repo\":\"$id\",\"kind\":\"double\"}"
+            done
+          } | jq -cs . | sed 's/^/targets=/' >> "$GITHUB_OUTPUT"
+
+  split:
+    needs: targets
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
+    env:
+      PREFIX: ${{ matrix.target.prefix }}
+      REPO: ${{ matrix.target.repo }}
+      KIND: ${{ matrix.target.kind }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Split
+        id: split
+        run: |
+          sha=$(git subtree split --prefix="$PREFIX" HEAD)
+          echo "main=$sha" >> "$GITHUB_OUTPUT"
+          echo "Split $PREFIX -> $sha"
+
+      # rollback-base is a synthetic commit with exactly main's tree and main as
+      # its parent: always deployable, always a different commit from main.
+      # (Not main~1: the first split's main~1 may hold no app at all.) Its dates
+      # are main's, so an unchanged main yields the same rollback-base commit.
+      - name: Build rollback-base
+        id: base
+        if: matrix.target.kind == 'double'
+        env:
+          MAIN: ${{ steps.split.outputs.main }}
+          GIT_AUTHOR_NAME: deploydoubles split
+          GIT_AUTHOR_EMAIL: split@deploydoubles.invalid
+          GIT_COMMITTER_NAME: deploydoubles split
+          GIT_COMMITTER_EMAIL: split@deploydoubles.invalid
+        run: |
+          date=$(git show -s --format=%cI "$MAIN")
+          export GIT_AUTHOR_DATE="$date" GIT_COMMITTER_DATE="$date"
+          tree=$(git rev-parse "$MAIN^{tree}")
+          base=$(git commit-tree "$tree" -p "$MAIN" -m "rollback base for $MAIN")
+          if [ "$base" = "$MAIN" ] || [ "$(git rev-parse "$base^{tree}")" != "$tree" ] || [ "$(git rev-parse "$base^")" != "$MAIN" ]; then
+            echo "::error::rollback-base must be a different commit with main's tree and main as its parent"
+            exit 1
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "rollback-base -> $base (tree $tree, parent $MAIN)"
+
+      # The only step that sees the token.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+          MAIN: ${{ steps.split.outputs.main }}
+          BASE: ${{ steps.base.outputs.base }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The SPLIT_TOKEN secret is not set; nothing was split."
+            exit 1
+          fi
+          if ! gh repo view "$ORG/$REPO" >/dev/null 2>&1; then
+            gh repo create "$ORG/$REPO" --public \
+              --description "Read-only mirror of $PREFIX in $ORG/doubles. Open issues and pull requests there." \
+              --disable-issues --disable-wiki
+          fi
+          remote="https://x-access-token:${GH_TOKEN}@github.com/$ORG/$REPO.git"
+          git push "$remote" "$MAIN:refs/heads/main"
+          if [ -n "$BASE" ]; then
+            git push --force "$remote" "$BASE:refs/heads/rollback-base"
+          fi
