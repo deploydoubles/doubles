@@ -1,0 +1,16 @@
+# DBAL only: this app has no entities. The connection accepts either a URL
+# (DATABASE_URL) or discrete variables (DB_HOST, DB_PORT, DB_DATABASE,
+# DB_USERNAME, DB_PASSWORD), which are assembled into a URL when
+# DATABASE_URL is empty or unset.
+parameters:
+    env(DB_HOST): '127.0.0.1'
+    env(DB_PORT): '5432'
+    env(DB_DATABASE): 'double'
+    env(DB_USERNAME): 'double'
+    env(DB_PASSWORD): ''
+    database_url_from_parts: 'postgresql://%env(urlencode:DB_USERNAME)%:%env(urlencode:DB_PASSWORD)%@%env(DB_HOST)%:%env(DB_PORT)%/%env(urlencode:DB_DATABASE)%'
+
+doctrine:
+    dbal:
+        url: '%env(default:database_url_from_parts:DATABASE_URL)%'
+        charset: utf8

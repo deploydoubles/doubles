@@ -1,0 +1,10 @@
+{
+  "catalog_version": "0.1",
+  "doubles": [
+    { "id": "laravel-mysql-redis-worker", "description": "Laravel.", "framework": { "name": "laravel", "version": "^13.0" }, "runtime": { "name": "php", "version": ">=8.3" }, "services": { "database": "mysql", "cache": "redis", "queue": "redis" }, "processes": { "web": { "command": "a" }, "worker": { "command": "b" }, "scheduler": { "command": "c" } }, "repository": "https://github.com/deploydoubles/laravel-mysql-redis-worker", "broken": false },
+    { "id": "nextjs-postgres", "description": "Next.", "framework": { "name": "next", "version": "^16.3" }, "runtime": { "name": "node", "version": ">=24" }, "services": { "database": "postgres" }, "processes": { "web": { "command": "a" } }, "repository": "https://github.com/deploydoubles/nextjs-postgres", "broken": true },
+    { "id": "php-mysql", "description": "Plain PHP.", "framework": { "name": "none", "version": "*" }, "runtime": { "name": "php", "version": ">=8.3" }, "services": { "database": "mysql" }, "processes": { "web": { "command": "a" }, "scheduler": { "command": "c" } }, "repository": "https://github.com/deploydoubles/php-mysql", "broken": false },
+    { "id": "symfony-postgres-worker", "description": "Symfony.", "framework": { "name": "symfony", "version": "8.1.*" }, "runtime": { "name": "php", "version": ">=8.4" }, "services": { "database": "postgres", "queue": "database" }, "processes": { "web": { "command": "a" }, "worker": { "command": "b" }, "scheduler": { "command": "c" } }, "repository": "https://github.com/deploydoubles/symfony-postgres-worker", "broken": false },
+    { "id": "Not A Valid Id", "services": { "database": "postgres" }, "processes": { "worker": {} } }
+  ]
+}

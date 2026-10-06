@@ -1,7 +1,7 @@
-import { isTlsError } from './net.js';
+import { fetchSameOrigin, isTlsError, type Fetch } from './net.js';
 import type { DeployReport } from './types.js';
 
-export type Fetch = typeof globalThis.fetch;
+export type { Fetch } from './net.js';
 
 export type ReportFetch =
   /** serverTime: the response's Date header (ms, whole seconds), or null without one. */
@@ -17,9 +17,6 @@ export interface RequestOptions {
   runId?: string;
   timeoutMs?: number;
 }
-
-const REDIRECTS = new Set([301, 302, 303, 307, 308]);
-const MAX_REDIRECTS = 5;
 
 /** A response counts as a report when it is JSON with a top-level status and a deploy object. */
 export function parseReport(body: string): DeployReport | null {
@@ -51,24 +48,12 @@ export async function fetchReport(fetchImpl: Fetch, url: URL, options: RequestOp
   if (options.runId) headers['deploy-run-id'] = options.runId;
 
   const signal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
-  let target = url;
-  let response: Response | undefined;
+  let response: Response;
   try {
-    for (let hop = 0; ; hop++) {
-      response = await fetchImpl(target, { headers, redirect: 'manual', signal });
-      if (!REDIRECTS.has(response.status)) break;
-      const location = response.headers.get('location');
-      await response.body?.cancel().catch(() => undefined);
-      if (!location || hop >= MAX_REDIRECTS) return { kind: 'not-report', httpStatus: response.status };
-      let next: URL;
-      try {
-        next = new URL(location, target);
-      } catch {
-        return { kind: 'not-report', httpStatus: response.status };
-      }
-      if (next.origin !== url.origin) return { kind: 'cross-origin-redirect', httpStatus: response.status };
-      target = next;
-    }
+    const fetched = await fetchSameOrigin(fetchImpl, url, { headers, signal });
+    if (fetched.kind === 'cross-origin-redirect') return { kind: 'cross-origin-redirect', httpStatus: fetched.httpStatus };
+    if (fetched.kind === 'bad-redirect') return { kind: 'not-report', httpStatus: fetched.httpStatus };
+    response = fetched.response;
   } catch (error) {
     return isTlsError(error) ? { kind: 'tls-error' } : { kind: 'network-error' };
   }

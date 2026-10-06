@@ -4,6 +4,7 @@
 #   doubles/<id> -> deploydoubles/<id>        (branches main and rollback-base)
 #   spec         -> deploydoubles/spec
 #   checks/php   -> deploydoubles/checks-php
+#   checks/node  -> deploydoubles/checks-node
 #
 # This workflow is the only writer to the split repositories. Never commit in
 # them directly: a split push is a fast-forward and fails if they diverge.
@@ -46,6 +47,7 @@ jobs:
           {
             echo '{"prefix":"spec","repo":"spec","kind":"spec"}'
             echo '{"prefix":"checks/php","repo":"checks-php","kind":"library"}'
+            echo '{"prefix":"checks/node","repo":"checks-node","kind":"library"}'
             for manifest in doubles/*/double.json; do
               id=$(basename "$(dirname "$manifest")")
               echo "{\"prefix\":\"doubles/$id\",\"repo\":\"$id\",\"kind\":\"double\"}"

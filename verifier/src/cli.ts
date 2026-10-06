@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { decideExitCode } from './decide.js';
-import { listDoubles } from './list.js';
+import { CatalogError, DEFAULT_CATALOG_URL, listDoubles, listToHuman } from './list.js';
 import { isLoopbackHost } from './net.js';
 import { toHuman, toJson } from './output.js';
 import { verify } from './verify.js';
@@ -10,7 +10,7 @@ const USAGE = `deploydoubles — verify that a deploy actually works
 
 Usage:
   deploydoubles verify <url> --commit <sha> [options]
-  deploydoubles list [--json]
+  deploydoubles list [--needs <a,b>] [--catalog <path or url>] [--json]
 
 verify options:
   --commit <sha>      the commit you deployed (required)
@@ -18,6 +18,13 @@ verify options:
   --token <token>     DEPLOY_REPORT_TOKEN, to read the full report (https://, or http:// on loopback only)
   --during-deploy     measure failed requests while the release switches
   --timeout <s>       seconds to wait for the report to settle (default 300)
+  --json              print one JSON object, nothing else
+
+list options:
+  --needs <a,b>       only doubles with all of these: services (postgres, redis),
+                      service kinds (database, queue), processes (worker, scheduler),
+                      runtime (php, node) or framework (laravel)
+  --catalog <src>     a catalog.json path or URL (default: ${DEFAULT_CATALOG_URL})
   --json              print one JSON object, nothing else
 
 Exit codes:
@@ -48,10 +55,28 @@ async function main(argv: string[]): Promise<Exit> {
   }
 
   if (command === 'list') {
-    const { values } = parseArgs({ args: rest, options: { json: { type: 'boolean' } }, strict: true });
-    const result = listDoubles();
-    process.stdout.write(values.json ? JSON.stringify(result) + '\n' : 'No doubles in the catalog yet.\n');
-    return 0;
+    let listArgs;
+    try {
+      listArgs = parseArgs({
+        args: rest,
+        strict: true,
+        options: { json: { type: 'boolean' }, needs: { type: 'string' }, catalog: { type: 'string' } },
+      }).values;
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n\n${USAGE}`);
+      return 64;
+    }
+    try {
+      const result = await listDoubles({ catalog: listArgs.catalog, needs: listArgs.needs?.split(',') ?? [] });
+      process.stdout.write((listArgs.json ? JSON.stringify(result) : listToHuman(result)) + '\n');
+      return 0;
+    } catch (error) {
+      if (!(error instanceof CatalogError)) throw error;
+      // Unreachable, like verify's exit 3.
+      if (listArgs.json) process.stdout.write(JSON.stringify({ doubles: [], error: error.message }) + '\n');
+      else process.stderr.write(`deploydoubles: ${error.message}\n`);
+      return 3;
+    }
   }
 
   if (command !== 'verify') {

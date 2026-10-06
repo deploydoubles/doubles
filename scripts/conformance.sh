@@ -2,12 +2,14 @@
 #
 # Starts a double with Docker Compose and verifies it from outside.
 #
-#   scripts/conformance.sh <double> [--without <service>]... [--stop <service>]...
+#   scripts/conformance.sh <double> [--without <service>]... [--stop <service>]... [--json-out <file>]
 #
 #   --without <service>  scale a result *producer* (worker, scheduler) to 0, so it never produces a result
 #   --stop <service>     stop a *dependency* (a database) after startup, then wait 75 s — one check
 #                        interval plus margin — so the app's next scheduled run records the failure
 #                        before the verifier reads the stored results
+#   --json-out <file>    also write the verifier's --json output to <file>, so a caller can assert
+#                        which check failed (the revert controls in CI do)
 #
 # The exit code is the verifier's: 0 pass, 1 a check failed, 2 pending at timeout, 3 unreachable or
 # wrong release. The stack is always torn down (docker compose down -v).
@@ -22,7 +24,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-  echo "usage: scripts/conformance.sh <double> [--without <service>]... [--stop <service>]..." >&2
+  echo "usage: scripts/conformance.sh <double> [--without <service>]... [--stop <service>]... [--json-out <file>]" >&2
   exit 64
 }
 
@@ -32,10 +34,12 @@ shift
 
 without=()
 stop=()
+json_out=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --without) [ $# -ge 2 ] || usage; without+=("$2"); shift 2 ;;
     --stop) [ $# -ge 2 ] || usage; stop+=("$2"); shift 2 ;;
+    --json-out) [ $# -ge 2 ] || usage; json_out="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -80,9 +84,13 @@ if [ ${#stop[@]} -gt 0 ]; then
 fi
 
 set +e
-node "$cli" verify "http://localhost:$port" --commit "$REVISION" --timeout 180 --json
+output=$(node "$cli" verify "http://localhost:$port" --commit "$REVISION" --timeout 180 --json)
 code=$?
 set -e
+printf '%s\n' "$output"
+if [ -n "$json_out" ]; then
+  printf '%s\n' "$output" > "$json_out"
+fi
 
 if [ "$code" -ne 0 ]; then
   echo "conformance: verifier exited $code; recent logs:" >&2

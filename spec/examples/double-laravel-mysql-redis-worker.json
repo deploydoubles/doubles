@@ -14,6 +14,7 @@
   "env": { "required": ["APP_KEY"], "generated": ["APP_KEY"] },
   "build": ["composer install --no-dev --optimize-autoloader"],
   "release": ["php artisan migrate --force"],
+  "persistent_paths": ["storage"],
   "expects": {
     "inside": ["database", "cache", "queue", "queue.release", "scheduler", "scheduler.release", "storage", "env"],
     "outside": ["reachability", "tls", "https_redirect", "release", "run_id", "downtime", "rollback", "persistence", "detection"]

@@ -16,7 +16,7 @@ Everything is declared in [`double.json`](double.json):
 | Environment | `APP_KEY` (generate it); database and Redis settings as a URL (`DATABASE_URL`, `REDIS_URL`) or discrete variables (`DB_HOST`, `REDIS_HOST`, …) |
 | Release step | `php artisan migrate --force` |
 
-`storage/` must be persistent and shared by the web process, the worker and the scheduler.
+`storage/` must be persistent, shared by the web process, the worker and the scheduler, and kept across releases: `double.json` lists it in `persistent_paths`. Set it up as the platform's persistent or shared storage — for example a persistent path in Strackt's Runtime settings, or `shared_dirs` in Deployer.
 
 ## Verify a deploy
 

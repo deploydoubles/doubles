@@ -8,6 +8,7 @@ on:
       - 'verifier/**'
       - 'spec/**'
       - 'scripts/**'
+      - 'catalog.json'
       - '.github/workflows/conformance.yml'
   workflow_dispatch:
 
@@ -31,6 +32,8 @@ jobs:
           npx --yes ajv-cli@5 validate -s spec/schema/report-v0.1.json -d "spec/examples/report-*.json" --spec=draft2020
           npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "spec/examples/double-*.json" --spec=draft2020
           npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "doubles/*/double.json" --spec=draft2020
+      - name: catalog.json is generated, never hand-edited
+        run: scripts/build-catalog --check
 
   checks-php:
     runs-on: ubuntu-latest
@@ -39,12 +42,31 @@ jobs:
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.4'
-          extensions: pdo_mysql, pdo_sqlite, redis
+          extensions: pdo_mysql, pdo_pgsql, pdo_sqlite, redis
           coverage: none
       - run: composer install --no-interaction --no-progress
         working-directory: checks/php
       - run: vendor/bin/pest
         working-directory: checks/php
+
+  checks-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # The hints parity test compares the Node hints with checks-php's Codes::hint().
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          coverage: none
+      - run: npm ci
+        working-directory: checks/node
+      - run: npm run build
+        working-directory: checks/node
+      - run: npm test -- --run
+        working-directory: checks/node
 
   verifier:
     runs-on: ubuntu-latest
@@ -106,27 +128,50 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
-      - name: Revert control — without its worker the double must fail
+      # Each control removes one thing the double needs and asserts the exact failure: verifier exit 1
+      # and the named check failing in its --json output. A worker → queue; a cron or scheduler
+      # service → scheduler (every one the Compose file has); with none of those, the database,
+      # stopped after startup → database.
+      - name: Revert controls — without a producer or its database the double must fail on the matching check
         env:
           DOUBLE: ${{ matrix.double }}
         run: |
-          if jq -e '.processes.worker' "doubles/$DOUBLE/double.json" >/dev/null; then
-            if scripts/conformance.sh "$DOUBLE" --without worker; then
-              echo "::error::$DOUBLE passed without its worker: the check that should catch that cannot fail"
-              exit 1
-            fi
-          else
-            echo "no worker declared; skipped"
+          manifest="doubles/$DOUBLE/double.json"
+          services=$(docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services)
+          database=$(jq -r '.services.database // empty' "$manifest")
+          controls=()
+          if jq -e '.processes.worker' "$manifest" >/dev/null; then
+            controls+=("--without worker queue")
           fi
-      - name: Revert control — without its scheduler the double must fail
-        env:
-          DOUBLE: ${{ matrix.double }}
-        run: |
-          if jq -e '.processes.scheduler' "doubles/$DOUBLE/double.json" >/dev/null; then
-            if scripts/conformance.sh "$DOUBLE" --without scheduler; then
-              echo "::error::$DOUBLE passed without its scheduler: the check that should catch that cannot fail"
-              exit 1
+          for producer in cron scheduler; do
+            if grep -qx "$producer" <<< "$services"; then
+              controls+=("--without $producer scheduler")
             fi
-          else
-            echo "no scheduler declared; skipped"
+          done
+          if [ "${#controls[@]}" -eq 0 ] && [ -n "$database" ] && grep -qx "$database" <<< "$services"; then
+            controls+=("--stop $database database")
           fi
+          if [ "${#controls[@]}" -eq 0 ]; then
+            echo "::error::$DOUBLE has no worker, cron, scheduler or database service: nothing proves its checks can fail"
+            exit 1
+          fi
+
+          failed=0
+          for control in "${controls[@]}"; do
+            read -r flag service check <<< "$control"
+            out="$RUNNER_TEMP/control-$service.json"
+            set +e
+            scripts/conformance.sh "$DOUBLE" "$flag" "$service" --json-out "$out"
+            code=$?
+            set -e
+            if [ "$code" -ne 1 ]; then
+              echo "::error::$DOUBLE $flag $service: verifier exited $code, expected 1 (a check failed)"
+              failed=1
+            elif ! jq -e --arg check "$check" '.exit_code == 1 and any(.checks[]; .name == $check and .status == "fail")' "$out" >/dev/null; then
+              echo "::error::$DOUBLE $flag $service: exit 1, but $check did not fail; the failing checks were: $(jq -r '[.checks[] | select(.status == "fail") | .name] | join(", ")' "$out")"
+              failed=1
+            else
+              echo "$DOUBLE $flag $service: $check failed, as it must"
+            fi
+          done
+          exit "$failed"

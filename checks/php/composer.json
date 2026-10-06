@@ -3,7 +3,7 @@
     "description": "Generates the Deploy Doubles deploy report (/.well-known/deploy-report) for PHP applications.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["deploy", "health", "verification", "laravel", "deploy-report"],
+    "keywords": ["deploy", "health", "verification", "laravel", "symfony", "deploy-report"],
     "homepage": "https://github.com/deploydoubles/checks-php",
     "authors": [
         { "name": "Jan Peter Wiersma" },
@@ -14,14 +14,19 @@
         "ext-json": "*"
     },
     "require-dev": {
+        "doctrine/dbal": "^4.0",
         "orchestra/testbench": "^10.0 || ^11.0",
-        "pestphp/pest": "^4.0 || ^5.0"
+        "pestphp/pest": "^4.0 || ^5.0",
+        "symfony/framework-bundle": "^7.4 || ^8.0",
+        "symfony/messenger": "^7.4 || ^8.0"
     },
     "autoload": {
         "psr-4": {
             "DeployDoubles\\Checks\\": "src/"
-        }
+        },
+        "files": ["bootstrap.php"]
     },
+    "bin": ["bin/deploy-report-run"],
     "autoload-dev": {
         "psr-4": {
             "DeployDoubles\\Checks\\Tests\\": "tests/"

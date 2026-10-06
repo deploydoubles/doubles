@@ -22,6 +22,7 @@ A manifest says what an application needs and which checks must pass once it is 
 | `env` | yes | `required`: variable names that must be present; `generated`: those a platform must generate (e.g. `APP_KEY`) |
 | `build` | no | Commands that build the app, in order |
 | `release` | no | Commands that run once per release before it serves (e.g. migrations) |
+| `persistent_paths` | no | Directories, relative to the app root, that must survive every deploy and be shared by all processes and releases — see below |
 | `expects` | yes | `inside`: inside check names that must pass; `outside`: outside check names that must pass |
 | `failure_modes` | no | Deliberate failures the double can produce (reserved; empty in v0.1) |
 
@@ -38,6 +39,12 @@ A key that is absent means the app does not use that kind of service.
 ### Connection settings
 
 A double MUST accept both connection styles for every service it uses: a URL (`DATABASE_URL`, `REDIS_URL`) and the framework's discrete variables (`DB_HOST`, `DB_PORT`, …). This keeps doubles deployable on any platform. Variables a platform provides for connections SHOULD NOT be listed in `env.required`, because which of the two styles a platform uses is its own choice.
+
+### `persistent_paths`
+
+Directories, relative to the app root, that must outlive a deploy: the same directory, with the same contents, for every process of a release and for the releases that follow it. A double MUST list the directory that holds its deploy report's result store (see [report → scheduled checks](report.md#scheduled-checks-stored-results)) and the one its `storage` check writes to; a platform that replaces them on each deploy loses the storage marker's record of earlier releases (the `persistence` outside check) and cannot recognise a returning release. Paths use `/`, have no leading `/` and no `.` or `..` segments.
+
+The field describes what the app needs, like `services`: whoever provisions the double for a test sets these paths up as the platform's persistent or shared storage. Platforms still MUST NOT read the manifest to configure an application.
 
 ### Process commands
 

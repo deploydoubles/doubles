@@ -64,9 +64,34 @@ describe.skipIf(!built && !process.env.CI)('cli (built)', () => {
     expect(code).toBe(0);
   });
 
-  it('list is an empty stub for now', async () => {
-    const { code, stdout } = await cli(['list', '--json']);
+  it('lists the doubles with every need from a local catalog', async () => {
+    const catalog = new URL('./fixtures/catalog.json', import.meta.url).pathname;
+    const { code, stdout, stderr } = await cli(['list', '--needs', 'postgres,worker', '--json', '--catalog', catalog]);
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toEqual({ doubles: [] });
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout).doubles.map((d: { id: string }) => d.id)).toEqual(['symfony-postgres-worker']);
+  });
+
+  it('exits 3 when the catalog cannot be read', async () => {
+    const { code, stdout } = await cli(['list', '--json', '--catalog', '/nonexistent/catalog.json']);
+    expect(code).toBe(3);
+    expect(JSON.parse(stdout)).toMatchObject({ doubles: [] });
+  });
+
+  it('prints a hostile catalog without terminal escapes or foreign repositories, in both modes', async () => {
+    const catalog = new URL('./fixtures/catalog-hostile.json', import.meta.url).pathname;
+    const unsafe = /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/;
+    const human = await cli(['list', '--catalog', catalog]);
+    const json = await cli(['list', '--json', '--catalog', catalog]);
+
+    for (const { code, stdout, stderr } of [human, json]) {
+      expect(code).toBe(0);
+      expect(stderr).toBe('');
+      expect(stdout).not.toMatch(unsafe);
+      expect(stdout).not.toContain('\\u001b');
+      expect(stdout).not.toContain('\\u202e');
+    }
+    expect(human.stdout).not.toContain('attacker');
+    expect(JSON.parse(json.stdout).doubles.map((d: { repository: string }) => d.repository)).toEqual(['https://github.com/deploydoubles/hostile-but-ours']);
   });
 });

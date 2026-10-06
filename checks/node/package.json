@@ -1,0 +1,38 @@
+{
+  "name": "@deploydoubles/checks",
+  "version": "0.1.0",
+  "description": "Generates the deploy report (/.well-known/deploy-report) for Node.js apps: a Next.js route handler and an in-process scheduler.",
+  "license": "MIT",
+  "author": "Jan Peter Wiersma",
+  "homepage": "https://github.com/deploydoubles/doubles/tree/main/checks/node",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deploydoubles/doubles.git",
+    "directory": "checks/node"
+  },
+  "bugs": "https://github.com/deploydoubles/doubles/issues",
+  "keywords": ["deploy", "health", "verification", "nextjs", "deploy-report"],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "ajv": "^8.17.0",
+    "typescript": "^7.0.0",
+    "vitest": "^5.0.0"
+  }
+}

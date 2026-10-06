@@ -26,8 +26,11 @@ jobs:
         run: |
           echo "doubles=$(for manifest in doubles/*/double.json; do basename "$(dirname "$manifest")"; done | sort | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
 
+  # Only main is judged and only main's catalog.json is written: a manual run
+  # dispatched from another branch lists its doubles and stops there.
   conformance:
     needs: doubles
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -45,20 +48,93 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
+      - name: Record the result
+        if: always()
+        env:
+          DOUBLE: ${{ matrix.double }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p results
+          if [ "$JOB_STATUS" = "success" ]; then echo green > "results/$DOUBLE"; else echo red > "results/$DOUBLE"; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: result-${{ matrix.double }}
+          path: results/${{ matrix.double }}
+          retention-days: 7
 
-  # Reserved: once catalog.json exists (written by scripts/build-catalog), a red
-  # double gets "broken": true there on main. Until then the run only fails.
+  # A red double gets "broken": true in catalog.json on main, a green one
+  # false. scripts/build-catalog stays the only writer of the file. The flags
+  # are written onto the newest main, never onto the ref the run started from,
+  # so a run can only ever change catalog.json's broken flags.
+  #
+  # Branch protection: the push goes straight to main as github-actions[bot].
+  # When main's ruleset forbids that, the push is refused and this job fails
+  # loudly. A bypass, if main gets one, must be limited to this workflow —
+  # never a general bypass for github-actions.
   mark-broken:
-    needs: conformance
-    if: failure()
+    needs: [doubles, conformance]
+    if: always() && github.ref == 'refs/heads/main' && needs.doubles.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: result-*
+          path: ${{ runner.temp }}/results
+          merge-multiple: true
       - name: Mark broken doubles in catalog.json
+        env:
+          DOUBLES: ${{ needs.doubles.outputs.doubles }}
+          RESULTS: ${{ runner.temp }}/results
         run: |
-          if [ ! -f catalog.json ]; then
-            echo "catalog.json does not exist yet; nothing to mark. See the failed conformance jobs."
-            exit 1
-          fi
-          echo "::error::catalog.json exists but marking broken doubles is not implemented yet."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for attempt in 1 2; do
+            # Start from the newest main every time: never the ref this run checked out.
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            base=$(git rev-parse HEAD)
+
+            broken=""
+            for id in $(echo "$DOUBLES" | jq -r '.[]'); do
+              # A double removed from main since the run started has no flag to set.
+              [ -f "doubles/$id/double.json" ] || continue
+              # No result file (the job was cancelled or crashed) counts as red.
+              if [ "$(cat "$RESULTS/$id" 2>/dev/null)" != "green" ]; then
+                broken="${broken:+$broken,}$id"
+              fi
+            done
+            scripts/build-catalog --broken "$broken"
+            if git diff --quiet catalog.json; then
+              echo "catalog.json unchanged."
+              exit 0
+            fi
+            git commit --quiet -m "chore(catalog): nightly broken flags${broken:+ ($broken)}" catalog.json
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            # Retry once, only when main moved under us (a non-fast-forward).
+            git fetch --quiet origin main
+            if [ "$(git rev-parse origin/main)" = "$base" ]; then
+              echo "::error::The push to main was refused although main did not move: branch protection does not let github-actions[bot] push catalog.json. catalog.json was not updated."
+              exit 1
+            fi
+            echo "main moved during the run (attempt $attempt); rebuilding on the new main."
+          done
+          echo "::error::main kept moving; catalog.json was not updated."
+          exit 1
+      - name: Fail the run when a double is red
+        if: needs.conformance.result != 'success'
+        run: |
+          echo "::error::At least one double failed its nightly conformance run; see the conformance jobs."
           exit 1

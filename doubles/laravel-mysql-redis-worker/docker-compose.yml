@@ -2,7 +2,8 @@
 # Builds from the monorepo root so the checks library under test is the one
 # in this working tree (MONOREPO=1).
 
-name: dd-laravel-mysql-redis-worker
+# DD_PROJECT and DD_IMAGE_TAG (see scripts/conformance.sh) let two runs share one machine.
+name: ${DD_PROJECT:-dd-laravel-mysql-redis-worker}
 
 x-app: &app
   build:

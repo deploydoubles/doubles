@@ -9,3 +9,5 @@ checks/php/composer.lock
 **/storage/framework/cache/data
 **/storage/framework/views/*.php
 **/storage/deploy-report
+**/.next
+checks/node/dist
