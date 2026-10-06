@@ -128,41 +128,50 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
-      - name: Revert control — without its result producer or database the double must fail
+      # Each control removes one thing the double needs and asserts the exact failure: verifier exit 1
+      # and the named check failing in its --json output. A worker → queue; a cron or scheduler
+      # service → scheduler (every one the Compose file has); with none of those, the database,
+      # stopped after startup → database.
+      - name: Revert controls — without a producer or its database the double must fail on the matching check
         env:
           DOUBLE: ${{ matrix.double }}
         run: |
-          # The worker when one is declared; otherwise a cron service, if the Compose file has one;
-          # otherwise the database, stopped after startup (a Compose service named after it).
           manifest="doubles/$DOUBLE/double.json"
           services=$(docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services)
           database=$(jq -r '.services.database // empty' "$manifest")
+          controls=()
           if jq -e '.processes.worker' "$manifest" >/dev/null; then
-            control=(--without worker)
-          elif printf '%s\n' "$services" | grep -qx cron; then
-            control=(--without cron)
-          elif [ -n "$database" ] && printf '%s\n' "$services" | grep -qx "$database"; then
-            control=(--stop "$database")
-          else
-            control=()
+            controls+=("--without worker queue")
           fi
-          if [ "${#control[@]}" -gt 0 ]; then
-            if scripts/conformance.sh "$DOUBLE" "${control[@]}"; then
-              echo "::error::$DOUBLE passed with ${control[*]}: the check that should catch that cannot fail"
-              exit 1
+          for producer in cron scheduler; do
+            if grep -qx "$producer" <<< "$services"; then
+              controls+=("--without $producer scheduler")
             fi
-          else
-            echo "no worker, cron or database service; skipped"
+          done
+          if [ "${#controls[@]}" -eq 0 ] && [ -n "$database" ] && grep -qx "$database" <<< "$services"; then
+            controls+=("--stop $database database")
           fi
-      - name: Revert control — without its scheduler the double must fail
-        env:
-          DOUBLE: ${{ matrix.double }}
-        run: |
-          if docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services | grep -qx scheduler; then
-            if scripts/conformance.sh "$DOUBLE" --without scheduler; then
-              echo "::error::$DOUBLE passed without its scheduler: the check that should catch that cannot fail"
-              exit 1
+          if [ "${#controls[@]}" -eq 0 ]; then
+            echo "::error::$DOUBLE has no worker, cron, scheduler or database service: nothing proves its checks can fail"
+            exit 1
+          fi
+
+          failed=0
+          for control in "${controls[@]}"; do
+            read -r flag service check <<< "$control"
+            out="$RUNNER_TEMP/control-$service.json"
+            set +e
+            scripts/conformance.sh "$DOUBLE" "$flag" "$service" --json-out "$out"
+            code=$?
+            set -e
+            if [ "$code" -ne 1 ]; then
+              echo "::error::$DOUBLE $flag $service: verifier exited $code, expected 1 (a check failed)"
+              failed=1
+            elif ! jq -e --arg check "$check" '.exit_code == 1 and any(.checks[]; .name == $check and .status == "fail")' "$out" >/dev/null; then
+              echo "::error::$DOUBLE $flag $service: exit 1, but $check did not fail; the failing checks were: $(jq -r '[.checks[] | select(.status == "fail") | .name] | join(", ")' "$out")"
+              failed=1
+            else
+              echo "$DOUBLE $flag $service: $check failed, as it must"
             fi
-          else
-            echo "no scheduler service (cron doubles are covered above); skipped"
-          fi
+          done
+          exit "$failed"
