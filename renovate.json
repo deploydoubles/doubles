@@ -1,7 +1,13 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "labels": ["dependencies"],
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
   "lockFileMaintenance": {
     "enabled": true,
     "automerge": true
@@ -9,14 +15,29 @@
   "packageRules": [
     {
       "description": "Patch and minor updates merge themselves once conformance is green.",
-      "matchUpdateTypes": ["patch", "minor", "pin", "digest"],
+      "matchUpdateTypes": [
+        "patch",
+        "minor",
+        "pin",
+        "digest"
+      ],
       "automerge": true,
       "automergeType": "pr"
     },
     {
       "description": "Major updates (a new framework major usually needs code changes) wait for a human.",
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "automerge": false
+    },
+    {
+      "description": "Our own check libraries are released from this repo; the doubles pick them up without waiting.",
+      "matchPackageNames": [
+        "deploydoubles/checks-php",
+        "@deploydoubles/checks"
+      ],
+      "minimumReleaseAge": null
     }
   ]
 }
