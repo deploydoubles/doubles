@@ -1,0 +1,56 @@
+# Publishes deploydoubles.dev on GitHub Pages: the landing page and
+# llms.txt from site/, the JSON Schemas at the URLs their $id promises
+# (/schema/*.json) and catalog.json. Runs on every change to those
+# sources on main.
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - spec/schema/**
+      - catalog.json
+      - .github/workflows/site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/schema
+          cp -R site/. _site/
+          cp spec/schema/*.json _site/schema/
+          cp catalog.json _site/
+          # Every schema must be served where its $id says it lives.
+          for f in _site/schema/*.json; do
+            want="https://deploydoubles.dev/schema/$(basename "$f")"
+            got=$(jq -r '."$id"' "$f")
+            [ "$got" = "$want" ] || { echo "::error file=$f::\$id is $got, expected $want"; exit 1; }
+          done
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
