@@ -2,7 +2,8 @@
 # Builds from the monorepo root so the checks library under test is the one
 # in this working tree (MONOREPO=1).
 
-name: dd-nextjs-postgres
+# DD_PROJECT and DD_IMAGE_TAG (see scripts/conformance.sh) let two runs share one machine.
+name: ${DD_PROJECT:-dd-nextjs-postgres}
 
 services:
   app:
@@ -13,7 +14,7 @@ services:
         APP_DIR: doubles/nextjs-postgres
         MONOREPO: "1"
         REVISION: ${REVISION:-}
-    image: deploydoubles-conformance/nextjs-postgres:local
+    image: deploydoubles-conformance/nextjs-postgres:${DD_IMAGE_TAG:-local}
     environment:
       # URL style (node-postgres also reads PGHOST, PGPORT, PGDATABASE, PGUSER
       # and PGPASSWORD when DATABASE_URL is unset: the double accepts both).

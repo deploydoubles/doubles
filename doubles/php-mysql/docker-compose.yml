@@ -2,7 +2,8 @@
 # Builds from the monorepo root so the checks library under test is the one
 # in this working tree (MONOREPO=1).
 
-name: dd-php-mysql
+# DD_PROJECT and DD_IMAGE_TAG (see scripts/conformance.sh) let two runs share one machine.
+name: ${DD_PROJECT:-dd-php-mysql}
 
 x-app: &app
   build:
@@ -12,7 +13,7 @@ x-app: &app
       APP_DIR: doubles/php-mysql
       MONOREPO: "1"
       REVISION: ${REVISION:-}
-  image: deploydoubles-conformance/php-mysql:local
+  image: deploydoubles-conformance/php-mysql:${DD_IMAGE_TAG:-local}
   volumes:
     - storage:/app/storage
 

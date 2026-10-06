@@ -2,7 +2,8 @@
 # Builds from the monorepo root so the checks library under test is the one
 # in this working tree (MONOREPO=1).
 
-name: dd-symfony-postgres-worker
+# DD_PROJECT and DD_IMAGE_TAG (see scripts/conformance.sh) let two runs share one machine.
+name: ${DD_PROJECT:-dd-symfony-postgres-worker}
 
 x-app: &app
   build:
@@ -12,7 +13,7 @@ x-app: &app
       APP_DIR: doubles/symfony-postgres-worker
       MONOREPO: "1"
       REVISION: ${REVISION:-}
-  image: deploydoubles-conformance/symfony-postgres-worker:local
+  image: deploydoubles-conformance/symfony-postgres-worker:${DD_IMAGE_TAG:-local}
   environment:
     APP_ENV: prod
     APP_DEBUG: "0"
