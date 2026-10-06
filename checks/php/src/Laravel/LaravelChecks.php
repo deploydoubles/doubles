@@ -11,8 +11,9 @@ use DeployDoubles\Checks\Checks\StorageCheck;
 use DeployDoubles\Checks\CheckResult;
 use DeployDoubles\Checks\Codes;
 use DeployDoubles\Checks\Config;
+use DeployDoubles\Checks\Environment;
+use Dotenv\Parser\Parser;
 use Illuminate\Contracts\Foundation\Application;
-use Illuminate\Support\Env;
 use Illuminate\Support\Str;
 
 /**
@@ -22,6 +23,12 @@ use Illuminate\Support\Str;
  */
 final class LaravelChecks
 {
+    /** Values Laravel's env() reads as null or empty. */
+    private const BLANK = ['', 'null', '(null)', 'empty', '(empty)'];
+
+    /** @var list<string>|null names with a value in the app's .env file, parsed once per run */
+    private ?array $dotenvNames = null;
+
     public function __construct(
         private readonly Application $app,
         private readonly Config $config,
@@ -37,7 +44,7 @@ final class LaravelChecks
             'cache' => $this->cache(...),
             'queue' => $this->queue(...),
             'storage' => fn () => (new StorageCheck($this->markerPath(), $this->commit))(),
-            'env' => fn () => (new EnvCheck($this->config->requiredEnv(), static fn (string $name) => self::env($name)))(),
+            'env' => fn () => (new EnvCheck($this->config->requiredEnv(), $this->envPresence(...)))(),
         ];
     }
 
@@ -161,11 +168,49 @@ final class LaravelChecks
         return is_string($path) && $path !== '' ? $path : $this->app->storagePath('app/deploy-report');
     }
 
-    private static function env(string $name): ?string
+    /**
+     * Whether a required variable is set, as a marker — never its value.
+     *
+     * The process environment comes first. With the configuration cached
+     * (`php artisan config:cache`, the usual production setup), Laravel never
+     * loads `.env`, so a variable that lives only there is invisible to env();
+     * the app still has it, so the `.env` file is read for its names.
+     */
+    private function envPresence(string $name): ?string
     {
-        $value = Env::get($name);
+        if (! self::blank(Environment::get($name))) {
+            return 'set';
+        }
+        if (! $this->app->configurationIsCached()) {
+            return null;
+        }
 
-        return is_scalar($value) && (string) $value !== '' ? (string) $value : null;
+        return in_array($name, $this->dotenvNames ??= $this->dotenvNames(), true) ? 'set' : null;
+    }
+
+    /** @return list<string> the names that have a non-blank value in the app's .env file */
+    private function dotenvNames(): array
+    {
+        $path = $this->app->environmentFilePath();
+        $contents = is_file($path) && is_readable($path) ? @file_get_contents($path) : false;
+        if ($contents === false) {
+            return [];
+        }
+
+        $names = [];
+        foreach ((new Parser())->parse($contents) as $entry) {
+            $value = $entry->getValue();
+            if ($value->isDefined() && ! self::blank($value->get()->getChars())) {
+                $names[] = $entry->getName();
+            }
+        }
+
+        return $names;
+    }
+
+    private static function blank(?string $value): bool
+    {
+        return $value === null || in_array(strtolower(trim($value)), self::BLANK, true);
     }
 
     private static function slug(string $driver): string
