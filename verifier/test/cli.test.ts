@@ -23,7 +23,14 @@ async function cli(args: string[]): Promise<{ code: number; stdout: string; stde
   }
 }
 
-describe.skipIf(!existsSync(CLI))('cli (built)', () => {
+// Locally the CLI tests skip until `npm run build`; in CI a missing build is a failure, never a skip.
+const built = existsSync(CLI);
+
+it('has a built CLI to test when running in CI', () => {
+  expect(built || !process.env.CI, 'dist/cli.js is missing: run npm run build before npm test').toBe(true);
+});
+
+describe.skipIf(!built && !process.env.CI)('cli (built)', () => {
   it('prints one JSON object and nothing on stderr in --json mode', async () => {
     const { code, stdout, stderr } = await cli(['verify', s.url, '--commit', SHA, '--timeout', '5', '--json', '--token', 'x'.repeat(40), '--run-id', 'secret-run']);
     const out = JSON.parse(stdout);
@@ -41,6 +48,20 @@ describe.skipIf(!existsSync(CLI))('cli (built)', () => {
 
     expect(code).toBe(0);
     expect(stdout).toContain('Vera: Deployed, and working.');
+  });
+
+  it('refuses to send a token over plain http to a non-loopback host (exit 64)', async () => {
+    const { code, stdout, stderr } = await cli(['verify', 'http://example.com', '--commit', SHA, '--token', 'x'.repeat(40)]);
+
+    expect(code).toBe(64);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('--token');
+    expect(stderr).not.toContain('x'.repeat(40));
+  });
+
+  it('allows a token over http to a loopback address', async () => {
+    const { code } = await cli(['verify', s.url, '--commit', SHA, '--timeout', '5', '--token', 'x'.repeat(40), '--json']);
+    expect(code).toBe(0);
   });
 
   it('list is an empty stub for now', async () => {

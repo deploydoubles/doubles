@@ -16,6 +16,9 @@ function base(overrides: Partial<VerifyResult> = {}): VerifyResult {
     ],
     inside: [{ name: 'database', status: 'pass' }],
     settled: true,
+    fresh: true,
+    reportStatus: 'pass',
+    httpStatus: 200,
     runIdRequested: false,
     ...overrides,
   };
@@ -69,6 +72,18 @@ describe('decideExitCode', () => {
     r.outside.push({ name: 'run_id', status: 'fail' });
     expect(decideExitCode(r)).toBe(3);
     expect(decideExitCode(base({ runIdRequested: true }))).toBe(3); // requested but never compared
+  });
+
+  it('never returns 0 when the report itself says it failed', () => {
+    expect(decideExitCode(base({ reportStatus: 'fail', httpStatus: 503 }))).toBe(1);
+    expect(decideExitCode(base({ reportStatus: 'fail' }))).toBe(1);
+    expect(decideExitCode(base({ httpStatus: 503 }))).toBe(1);
+    expect(decideExitCode(base({ httpStatus: 500 }))).toBe(1);
+    expect(decideExitCode(base({ reportStatus: 'ok' }))).toBe(1);
+  });
+
+  it('returns 2 when the settled report is not fresh evidence of this deployment', () => {
+    expect(decideExitCode(base({ fresh: false }))).toBe(2);
   });
 
   it('treats an unknown status as a failure', () => {

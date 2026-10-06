@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { decideExitCode } from '../src/decide.js';
+import { CODE_HINTS } from '../src/hints.js';
 import { commitMatches, verify } from '../src/verify.js';
 import { OTHER, SHA, fakeDeps, report, sendJson, serve } from './helpers.js';
 
@@ -38,7 +39,8 @@ describe('verify', () => {
     const result = await verify({ url: s.url, commit: SHA, timeoutSeconds: 10 }, fakeDeps());
 
     expect(decideExitCode(result)).toBe(1);
-    expect(result.inside[0]).toEqual({ name: 'database', status: 'fail', hint: 'Start the database.' });
+    // The hint is the verifier's own for the code; the report's text is never used.
+    expect(result.inside[0]).toEqual({ name: 'database', status: 'fail', hint: CODE_HINTS.database_unreachable });
   });
 
   it('polls until the report settles, then stops', async () => {

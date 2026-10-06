@@ -2,6 +2,7 @@
 import { parseArgs } from 'node:util';
 import { decideExitCode } from './decide.js';
 import { listDoubles } from './list.js';
+import { isLoopbackHost } from './net.js';
 import { toHuman, toJson } from './output.js';
 import { verify } from './verify.js';
 
@@ -14,7 +15,7 @@ Usage:
 verify options:
   --commit <sha>      the commit you deployed (required)
   --run-id <id>       the DEPLOY_RUN_ID you set for this deploy; checked only when given
-  --token <token>     DEPLOY_REPORT_TOKEN, to read the full report
+  --token <token>     DEPLOY_REPORT_TOKEN, to read the full report (https://, or http:// on loopback only)
   --during-deploy     measure failed requests while the release switches
   --timeout <s>       seconds to wait for the report to settle (default 300)
   --json              print one JSON object, nothing else
@@ -27,6 +28,16 @@ Exit codes:
 `;
 
 type Exit = 0 | 1 | 2 | 3 | 64;
+
+/** A token over plain http to anything but this machine is readable on the way. */
+function sendsTokenInClear(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname);
+  } catch {
+    return true;
+  }
+}
 
 async function main(argv: string[]): Promise<Exit> {
   const [command, ...rest] = argv;
@@ -79,15 +90,17 @@ async function main(argv: string[]): Promise<Exit> {
   const timeout = values.timeout === undefined ? 300 : Number(values.timeout);
   const usageError = !url
     ? 'A URL is required.'
-    : !/^https?:\/\//.test(url)
-      ? 'The URL must start with http:// or https://.'
+    : !/^https?:\/\//.test(url) || !URL.canParse(url)
+      ? 'The URL must be a valid http:// or https:// URL.'
       : !values.commit
         ? '--commit is required.'
         : !/^[0-9a-fA-F]{7,64}$/.test(values.commit)
           ? '--commit must be a hexadecimal commit sha (at least 7 characters).'
           : !Number.isFinite(timeout) || timeout <= 0
             ? '--timeout must be a positive number of seconds.'
-            : null;
+            : values.token !== undefined && sendsTokenInClear(url!)
+              ? '--token is only sent over https:// (or http:// to a loopback address); plain http would expose it.'
+              : null;
   if (usageError) {
     process.stderr.write(`${usageError}\n\n${USAGE}`);
     return 64;

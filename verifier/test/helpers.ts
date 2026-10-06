@@ -29,13 +29,24 @@ export async function serve(handler: Handler): Promise<{ url: string; close: () 
   };
 }
 
-export function report(opts: { status?: string; settled?: boolean; commit?: string | null; checks?: Record<string, object>; runIdMatch?: boolean | null; tier?: 'full' | 'public' } = {}): object {
+/**
+ * A report. In the full tier every check gets `checked_at` (default: now, so the report counts as
+ * fresh); pass `checkedAt` to date the evidence, e.g. before the verifier first saw the release.
+ */
+export function report(
+  opts: { status?: string; settled?: boolean; commit?: string | null; checks?: Record<string, object>; runIdMatch?: boolean | null; tier?: 'full' | 'public'; checkedAt?: string } = {},
+): object {
   const tier = opts.tier ?? 'full';
+  const checkedAt = opts.checkedAt ?? new Date().toISOString();
+  const checks = opts.checks ?? { database: { status: 'pass' } };
   const deploy: Record<string, unknown> = {
     spec_version: '0.1',
     tier,
     settled: opts.settled ?? true,
-    checks: opts.checks ?? { database: { status: 'pass' } },
+    checks:
+      tier === 'full'
+        ? Object.fromEntries(Object.entries(checks).map(([name, check]) => [name, { checked_at: checkedAt, ...check }]))
+        : checks,
   };
   if (tier === 'full') {
     deploy.app = { runtime: 'php 8.4' };
