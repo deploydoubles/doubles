@@ -1,0 +1,34 @@
+{
+  "name": "deploydoubles",
+  "version": "0.1.0",
+  "description": "Verify that a deploy actually works: reads the app's deploy report, runs outside checks, returns one exit code.",
+  "license": "MIT",
+  "author": "Jan Peter Wiersma",
+  "homepage": "https://github.com/deploydoubles/doubles/tree/main/verifier",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deploydoubles/doubles.git",
+    "directory": "verifier"
+  },
+  "bugs": "https://github.com/deploydoubles/doubles/issues",
+  "keywords": ["deploy", "verify", "health", "deploy-report", "ci", "agents"],
+  "type": "module",
+  "bin": {
+    "deploydoubles": "dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.0",
+    "vitest": "^5.0.0"
+  }
+}
