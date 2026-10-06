@@ -63,7 +63,11 @@ Commit `deploy-report.config.json` in the app root:
 
 ## What it checks
 
-`database` (connects, engine, write then read), `storage` (writable marker), `env` (required names present), `scheduler` and `scheduler.release` (a fresh heartbeat from the in-process scheduler, one release per minute). Results older than three minutes turn the report into `scheduler: fail`.
+`database` (connects, engine, write then read through a temporary table — skipped with `database_write_unsupported` on a server without temporary tables), `storage` (writable marker), `env` (required names present), `scheduler` and `scheduler.release` (a fresh heartbeat from the in-process scheduler, one release per minute). Results older than three minutes turn the report into `scheduler: fail`; a store the app cannot write to turns it into `scheduler: fail` with `report_store_unwritable`.
+
+An app with a queue worker can declare `queue` and `queue.release`: pass `dispatchProbe` to `startDeployReport` to enqueue a job carrying the probe name, and call `answerDeployReportProbe(probe)` from that job. A probe left unanswered for two minutes fails `queue`.
+
+Every `checked_at` dates the evidence (the scheduled run, the heartbeat, the answered probe), never the request. When a release comes back — a rollback, or a redeploy of a commit that ran before — its first scheduled run discards what its earlier life left in the store and starts fresh, so `booted_at` is when it was first seen running again.
 
 ## Security
 

@@ -34,8 +34,10 @@ export function configurationWarning(config: Config): string | null {
 
 /** Answers whether the Deploy-Run-Id header matches DEPLOY_RUN_ID: true, false or null. Never the value. */
 export function runIdMatch(configured: string | null, presented: string | null): boolean | null {
-  if (!configured || !presented) return null;
-  return safeEqual(configured, presented.trim());
+  const want = configured?.trim() ?? '';
+  const got = presented?.trim() ?? '';
+  if (want === '' || got === '') return null;
+  return safeEqual(want, got);
 }
 
 /**

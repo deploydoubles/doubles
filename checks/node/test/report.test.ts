@@ -147,4 +147,38 @@ describe('the report', () => {
     const { json } = await get();
     expect(json.deploy.checks.database).toMatchObject({ status: 'fail', code: 'database_engine_mismatch', observed: 'mysql 8.4' });
   });
+
+  it('carries checked_at on every check in every state, as the schema requires in the full tier', async () => {
+    if (!existsSync(schemaUrl)) return;
+    configure({ tier: 'full', checks: { database: { expected: 'postgres' }, queue: {}, 'queue.release': {}, scheduler: {}, 'scheduler.release': {}, storage: {} } });
+    const config = loadConfig(root);
+    const store = new FileStore(config.storePath);
+    const reports = [readReport(store, config, SHA, 1_000)]; // before the first run
+    await runChecks(store, config, SHA, nodeChecks(config, SHA, fakeClient({ failCreate: { code: '0A000' } })), { now: 1_010, dispatchProbe: () => undefined });
+    reports.push(readReport(store, config, SHA, 1_020)); // pending queue, skipped write test
+    reports.push(readReport(store, config, SHA, 1_200)); // stale
+    reports.push(readReport(store, config, 'f'.repeat(40), 1_400)); // never ran
+
+    for (const report of reports) {
+      expect(validate(report)).toBe(true);
+      for (const check of Object.values(report.deploy.checks)) expect(check).toHaveProperty('checked_at');
+    }
+    expect(reports[1]!.deploy.checks.database).toMatchObject({ status: 'skip', code: 'database_write_unsupported' });
+
+    // The schema itself rejects a full-tier check without checked_at.
+    const withoutCheckedAt = structuredClone(reports[1]!);
+    delete withoutCheckedAt.deploy.checks.database!.checked_at;
+    expect(validate(withoutCheckedAt)).toBe(false);
+  });
+
+  it('serves report_store_unwritable as a schema-valid failing report', async () => {
+    writeFileSync(join(root, 'not-a-directory'), '');
+    configure({ tier: 'full', store_path: 'not-a-directory/store', checks: { database: {}, scheduler: {} } });
+
+    const { status, json } = await get();
+
+    expect(status).toBe(503);
+    expect(validate(json)).toBe(true);
+    expect(json.deploy.checks).toEqual({ scheduler: expect.objectContaining({ status: 'fail', code: 'report_store_unwritable' }) });
+  });
 });

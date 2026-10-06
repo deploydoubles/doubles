@@ -1,6 +1,7 @@
 import { nodeChecks, type DatabaseClient } from './checks.js';
 import { resolveCommit } from './commit.js';
 import { loadConfig } from './config.js';
+import { answerProbe } from './probes.js';
 import { readReport } from './reader.js';
 import { runChecks } from './runner.js';
 import { FileStore } from './store.js';
@@ -38,6 +39,11 @@ export interface DeployReportOptions {
   database?: () => DatabaseClient;
   /** The app root (default: the working directory). */
   root?: string;
+  /**
+   * For an app with a queue worker that declares `queue`: dispatches a job
+   * carrying this probe name. The job calls answerDeployReportProbe(probe).
+   */
+  dispatchProbe?: (probe: string) => void | Promise<void>;
 }
 
 /** Runs the declared checks once and stores the results. */
@@ -47,7 +53,14 @@ export async function runDeployReport(options: DeployReportOptions = {}): Promis
   const commit = resolveCommit(root);
   await runChecks(new FileStore(config.storePath), config, commit, nodeChecks(config, commit, options.database), {
     warn: (message) => console.warn(`deploy-report: ${message}`),
+    ...(options.dispatchProbe ? { dispatchProbe: options.dispatchProbe } : {}),
   });
+}
+
+/** Answers a queue probe from the worker that processed it, with the worker's own commit. */
+export function answerDeployReportProbe(probe: string, options: { root?: string } = {}): void {
+  const root = options.root ?? process.cwd();
+  answerProbe(new FileStore(loadConfig(root).storePath), probe, resolveCommit(root), Math.floor(Date.now() / 1000));
 }
 
 const SCHEDULER = Symbol.for('deploydoubles.checks.scheduler');

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { expected as expectedOf, requiredEnv, type Config } from './config.js';
 import { env as readEnv } from './environment.js';
+import { isUnsupported } from './errors.js';
 import { fail, pass, type CheckResult } from './result.js';
 import { FileStore, Store } from './store.js';
 
@@ -43,20 +44,47 @@ async function databaseCheck(factory: () => DatabaseClient, expected: string | n
     }
 
     const value = randomBytes(8).toString('hex');
-    let read: unknown;
     try {
       await client.query('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
+    } catch (error) {
+      if (isUnsupported(error)) {
+        // Some servers have no temporary tables. That is a limit of the test, not a fault of the deploy.
+        return { status: 'skip', expected, observed, code: 'database_write_unsupported', detail: 'connected; no temporary tables on this server, write test skipped' };
+      }
+      return fail('database_write_failed', 'write then read failed', expected, observed);
+    }
+
+    let read: unknown;
+    try {
       await client.query('INSERT INTO deploy_report_probe (v) VALUES ($1)', [value]);
       read = (await client.query('SELECT v FROM deploy_report_probe')).rows[0]?.v;
-      await client.query('DROP TABLE deploy_report_probe');
     } catch {
       return fail('database_write_failed', 'write then read failed', expected, observed);
+    } finally {
+      // A temporary table ends with the session anyway.
+      await client.query(dropTemporaryTable(observedEngine)).catch(() => undefined);
     }
     if (read !== value) return fail('database_write_failed', 'the value read back differs', expected, observed);
 
     return pass('connected; write then read ok', expected, observed);
   } finally {
     await client.end().catch(() => undefined);
+  }
+}
+
+/**
+ * Drops only the temporary table: a plain DROP TABLE could drop a real table
+ * of the same name (and on MySQL commits an open transaction).
+ */
+export function dropTemporaryTable(engine: string): string {
+  switch (engine) {
+    case 'mysql':
+    case 'mariadb':
+      return 'DROP TEMPORARY TABLE deploy_report_probe';
+    case 'postgres':
+      return 'DROP TABLE pg_temp.deploy_report_probe';
+    default:
+      return 'DROP TABLE deploy_report_probe';
   }
 }
 

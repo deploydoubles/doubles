@@ -44,4 +44,10 @@ describe('runIdMatch', () => {
     expect(runIdMatch(null, 'run-1')).toBeNull();
     expect(runIdMatch('run-1', null)).toBeNull();
   });
+
+  it('ignores surrounding whitespace on both sides', () => {
+    expect(runIdMatch('run-123\n', ' run-123 ')).toBe(true);
+    expect(runIdMatch('  ', 'run-123')).toBeNull();
+    expect(runIdMatch('run-123', '\t')).toBeNull();
+  });
 });
