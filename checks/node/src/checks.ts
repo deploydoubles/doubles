@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { expected as expectedOf, requiredEnv, type Config } from './config.js';
 import { env as readEnv } from './environment.js';
-import { isUnsupported } from './errors.js';
+import { DatabaseConnectError, DeployReportTimeoutError, isUnsupported } from './errors.js';
 import { fail, pass, type CheckResult } from './result.js';
 import { FileStore, Store } from './store.js';
 
@@ -15,7 +15,10 @@ export interface DatabaseClient {
 
 export type Check = () => Promise<CheckResult>;
 
-const CONNECT_TIMEOUT_MS = 10_000;
+/** The bound on one check's database work, connect and queries together. */
+export const CHECK_TIMEOUT_MS = 10_000;
+/** How long ending a client may take before it is abandoned. */
+const END_TIMEOUT_MS = 2_000;
 const MARKERS_KEPT = 20;
 
 /**
@@ -23,53 +26,93 @@ const MARKERS_KEPT = 20;
  * from the app's own factory, storage and env. Errors propagate to the
  * runner, which maps them to fixed codes; nothing here reads an error message.
  */
-export function nodeChecks(config: Config, commit: string | null, database?: () => DatabaseClient): Record<string, Check> {
+export function nodeChecks(
+  config: Config,
+  commit: string | null,
+  database?: () => DatabaseClient,
+  timeoutMs: number = CHECK_TIMEOUT_MS,
+): Record<string, Check> {
   const checks: Record<string, Check> = {
     storage: async () => storage(config.markerPath, commit),
     env: async () => envCheck(requiredEnv(config)),
   };
-  if (database) checks.database = () => databaseCheck(database, expectedOf(config, 'database'));
+  if (database) checks.database = () => databaseCheck(database, expectedOf(config, 'database'), timeoutMs);
   return checks;
 }
 
-async function databaseCheck(factory: () => DatabaseClient, expected: string | null): Promise<CheckResult> {
+/**
+ * The database check, bounded: a server that accepts the connection and then
+ * never answers must not hold the scheduled run. Past the bound the client is
+ * ended and the check fails as unreachable.
+ */
+async function databaseCheck(factory: () => DatabaseClient, expected: string | null, timeoutMs: number): Promise<CheckResult> {
   const client = factory();
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new DeployReportTimeoutError()), timeoutMs);
+  });
+  const work = databaseWork(client, expected);
+  // The work may settle after the deadline won; that late outcome is not wanted.
+  work.catch(() => undefined);
   try {
-    await withTimeout(client.connect(), CONNECT_TIMEOUT_MS);
-    const version = (await client.query('SELECT version() AS v')).rows[0]?.v;
-    const observed = engine(typeof version === 'string' ? version : '');
-    const observedEngine = observed.split(' ')[0] ?? '';
-    if (expected !== null && expected !== observedEngine) {
-      return fail('database_engine_mismatch', 'connected to a different engine than declared', expected, observed);
-    }
-
-    const value = randomBytes(8).toString('hex');
-    try {
-      await client.query('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
-    } catch (error) {
-      if (isUnsupported(error)) {
-        // Some servers have no temporary tables. That is a limit of the test, not a fault of the deploy.
-        return { status: 'skip', expected, observed, code: 'database_write_unsupported', detail: 'connected; no temporary tables on this server, write test skipped' };
-      }
-      return fail('database_write_failed', 'write then read failed', expected, observed);
-    }
-
-    let read: unknown;
-    try {
-      await client.query('INSERT INTO deploy_report_probe (v) VALUES ($1)', [value]);
-      read = (await client.query('SELECT v FROM deploy_report_probe')).rows[0]?.v;
-    } catch {
-      return fail('database_write_failed', 'write then read failed', expected, observed);
-    } finally {
-      // A temporary table ends with the session anyway.
-      await client.query(dropTemporaryTable(observedEngine)).catch(() => undefined);
-    }
-    if (read !== value) return fail('database_write_failed', 'the value read back differs', expected, observed);
-
-    return pass('connected; write then read ok', expected, observed);
+    return await Promise.race([work, deadline]);
   } finally {
-    await client.end().catch(() => undefined);
+    clearTimeout(timer);
+    await endWithin(client, END_TIMEOUT_MS);
   }
+}
+
+/** Ends the client, without waiting on a wedged connection for longer than `ms`. */
+async function endWithin(client: DatabaseClient, ms: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.resolve()
+      .then(() => client.end())
+      .catch(() => undefined),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]);
+  clearTimeout(timer);
+}
+
+async function databaseWork(client: DatabaseClient, expected: string | null): Promise<CheckResult> {
+  try {
+    await client.connect();
+  } catch (error) {
+    throw new DatabaseConnectError(error);
+  }
+  const version = (await client.query('SELECT version() AS v')).rows[0]?.v;
+  const observed = engine(typeof version === 'string' ? version : '');
+  const observedEngine = observed.split(' ')[0] ?? '';
+  if (expected !== null && expected !== observedEngine) {
+    return fail('database_engine_mismatch', 'connected to a different engine than declared', expected, observed);
+  }
+
+  const value = randomBytes(8).toString('hex');
+  try {
+    await client.query('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
+  } catch (error) {
+    if (isUnsupported(error)) {
+      // Some servers have no temporary tables. That is a limit of the test, not a fault of the deploy.
+      return { status: 'skip', expected, observed, code: 'database_write_unsupported', detail: 'connected; no temporary tables on this server, write test skipped' };
+    }
+    return fail('database_write_failed', 'write then read failed', expected, observed);
+  }
+
+  let read: unknown;
+  try {
+    await client.query('INSERT INTO deploy_report_probe (v) VALUES ($1)', [value]);
+    read = (await client.query('SELECT v FROM deploy_report_probe')).rows[0]?.v;
+  } catch {
+    return fail('database_write_failed', 'write then read failed', expected, observed);
+  } finally {
+    // A temporary table ends with the session anyway.
+    await client.query(dropTemporaryTable(observedEngine)).catch(() => undefined);
+  }
+  if (read !== value) return fail('database_write_failed', 'the value read back differs', expected, observed);
+
+  return pass('connected; write then read ok', expected, observed);
 }
 
 /**
@@ -128,12 +171,4 @@ function envCheck(required: string[]): CheckResult {
   const missing = required.filter((name) => readEnv(name) === null);
   if (missing.length > 0) return fail('env_missing', `missing: ${missing.join(', ')}`);
   return pass(`${required.length} of ${required.length} required variables present`);
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }

@@ -181,4 +181,53 @@ describe('the report', () => {
     expect(validate(json)).toBe(true);
     expect(json.deploy.checks).toEqual({ scheduler: expect.objectContaining({ status: 'fail', code: 'report_store_unwritable' }) });
   });
+
+  it('ignores a token in the query string', async () => {
+    process.env.DEPLOY_REPORT_TOKEN = TOKEN;
+    configure({ checks: { scheduler: {}, storage: {} } });
+    await runDeployReport({ root });
+
+    const response = await createDeployReportHandler({ root })(
+      new Request(`http://localhost/.well-known/deploy-report?token=${TOKEN}&access_token=${TOKEN}&bearer=${TOKEN}`),
+    );
+    const json = await response.json();
+
+    expect(json.deploy.tier).toBe('public');
+    expect(json.deploy).not.toHaveProperty('release');
+  });
+
+  it('fails a declared queue at once when no probe dispatcher is configured, and skips queue.release', async () => {
+    configure({ tier: 'full', checks: { queue: { expected: 'redis' }, 'queue.release': {}, scheduler: {} } });
+    await runDeployReport({ root });
+
+    const { status, json } = await get();
+
+    expect(status).toBe(503);
+    expect(validate(json)).toBe(true);
+    expect(json.deploy.settled).toBe(true);
+    expect(json.deploy.checks.queue).toMatchObject({ status: 'fail', code: 'queue_driver_mismatch', expected: 'redis' });
+    expect(json.deploy.checks['queue.release']).toMatchObject({ status: 'skip' });
+  });
+
+  it('fails queue.release alone the same way: it is never left pending', async () => {
+    configure({ tier: 'full', checks: { 'queue.release': {}, scheduler: {} } });
+    await runDeployReport({ root });
+
+    const { json } = await get();
+
+    expect(json.deploy.checks['queue.release']).toMatchObject({ status: 'skip' });
+    expect(json.deploy.settled).toBe(true);
+  });
+
+  it('reports a connect timeout that carries no code as database_unreachable, without its message', async () => {
+    configure({ tier: 'full', checks: { database: { expected: 'postgres' }, scheduler: {} } });
+    // node-postgres ends a connectionTimeoutMillis attempt with exactly this: no code, no cause.
+    await runDeployReport({ root, database: fakeClient({ failConnect: new Error('timeout expired') }) });
+
+    const { text, json } = await get();
+
+    expect(json.deploy.checks.database).toMatchObject({ status: 'fail', code: 'database_unreachable' });
+    expect(text).not.toContain('timeout expired');
+  });
 });
+

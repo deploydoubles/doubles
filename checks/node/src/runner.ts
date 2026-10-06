@@ -1,4 +1,4 @@
-import { declares, type Config } from './config.js';
+import { declares, expected as expectedOf, type Config } from './config.js';
 import { mapError } from './errors.js';
 import { newProbeId, recordProbe } from './probes.js';
 import { epoch, STALE_AFTER } from './reader.js';
@@ -68,6 +68,15 @@ export async function runChecks(
       results[name] = { ...fail(mapError(name, error)), checkedAt: now };
       reportError(options.warn, name, error);
     }
+  }
+
+  // A declared queue with nothing to send its probe through can never be
+  // answered: fail it now instead of leaving queue.release pending forever.
+  if (results.queue !== undefined && results.queue.status !== 'fail' && !options.dispatchProbe) {
+    results.queue = {
+      ...fail('queue_driver_mismatch', 'no probe dispatcher is configured', results.queue.expected ?? expectedOf(config, 'queue')),
+      checkedAt: now,
+    };
   }
 
   const queue = results.queue;

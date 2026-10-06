@@ -12,7 +12,16 @@ export function tempRoot(): string {
 
 /** An in-memory stand-in for a node-postgres Client. */
 export function fakeClient(
-  opts: { version?: string; failConnect?: unknown; failCreate?: unknown; calls?: { n: number }; queries?: string[] } = {},
+  opts: {
+    version?: string;
+    failConnect?: unknown;
+    failCreate?: unknown;
+    calls?: { n: number };
+    queries?: string[];
+    /** Every query after connect never settles, as on a wedged connection. */
+    hangQueries?: boolean;
+    ends?: { n: number };
+  } = {},
 ): () => DatabaseClient {
   return () => {
     const table: string[] = [];
@@ -23,13 +32,16 @@ export function fakeClient(
       },
       async query(text: string, values?: unknown[]) {
         opts.queries?.push(text);
+        if (opts.hangQueries) return new Promise<never>(() => undefined);
         if (text.startsWith('CREATE TEMPORARY') && opts.failCreate) throw opts.failCreate;
         if (text.startsWith('SELECT version()')) return { rows: [{ v: opts.version ?? 'PostgreSQL 17.6 on x86_64-pc-linux-gnu, compiled by gcc' }] };
         if (text.startsWith('INSERT')) table.push(String(values?.[0]));
         if (text.startsWith('SELECT v')) return { rows: table.map((v) => ({ v })) };
         return { rows: [] };
       },
-      async end() {},
+      async end() {
+        if (opts.ends) opts.ends.n++;
+      },
     };
   };
 }

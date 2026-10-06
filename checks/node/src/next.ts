@@ -1,4 +1,4 @@
-import { nodeChecks, type DatabaseClient } from './checks.js';
+import { CHECK_TIMEOUT_MS, nodeChecks, type DatabaseClient } from './checks.js';
 import { resolveCommit } from './commit.js';
 import { loadConfig } from './config.js';
 import { answerProbe } from './probes.js';
@@ -44,6 +44,11 @@ export interface DeployReportOptions {
    * carrying this probe name. The job calls answerDeployReportProbe(probe).
    */
   dispatchProbe?: (probe: string) => void | Promise<void>;
+  /**
+   * Bounds, for tests: one check's database work (default 10 s), one whole
+   * scheduled run (default 45 s) and the interval between runs (default 60 s).
+   */
+  timing?: { checkTimeoutMs?: number; runTimeoutMs?: number; intervalMs?: number };
 }
 
 /** Runs the declared checks once and stores the results. */
@@ -51,7 +56,8 @@ export async function runDeployReport(options: DeployReportOptions = {}): Promis
   const root = options.root ?? process.cwd();
   const config = loadConfig(root);
   const commit = resolveCommit(root);
-  await runChecks(new FileStore(config.storePath), config, commit, nodeChecks(config, commit, options.database), {
+  const checks = nodeChecks(config, commit, options.database, options.timing?.checkTimeoutMs ?? CHECK_TIMEOUT_MS);
+  await runChecks(new FileStore(config.storePath), config, commit, checks, {
     warn: (message) => console.warn(`deploy-report: ${message}`),
     ...(options.dispatchProbe ? { dispatchProbe: options.dispatchProbe } : {}),
   });
@@ -65,6 +71,8 @@ export function answerDeployReportProbe(probe: string, options: { root?: string 
 
 const SCHEDULER = Symbol.for('deploydoubles.checks.scheduler');
 export const INTERVAL_MS = 60_000;
+/** The bound on one scheduled run; past it the next tick may start, whatever the run is waiting on. */
+export const RUN_TIMEOUT_MS = 45_000;
 
 /**
  * Starts the in-process scheduler: one run now, then one every 60 s. Call it
@@ -76,20 +84,34 @@ export function startDeployReport(options: DeployReportOptions = {}): void {
   const state = globalThis as typeof globalThis & { [SCHEDULER]?: NodeJS.Timeout };
   if (state[SCHEDULER]) return;
 
+  const runTimeoutMs = options.timing?.runTimeoutMs ?? RUN_TIMEOUT_MS;
   let running = false;
   const tick = (): void => {
     if (running) return;
     running = true;
-    runDeployReport(options)
-      .catch(() => console.warn('deploy-report: the scheduled run failed'))
+    within(runDeployReport(options), runTimeoutMs)
+      .catch((error: unknown) =>
+        console.warn(error === RUN_TIMED_OUT ? 'deploy-report: the scheduled run did not finish in time' : 'deploy-report: the scheduled run failed'),
+      )
       .finally(() => {
         running = false;
       });
   };
 
   tick();
-  state[SCHEDULER] = setInterval(tick, INTERVAL_MS);
+  state[SCHEDULER] = setInterval(tick, options.timing?.intervalMs ?? INTERVAL_MS);
   state[SCHEDULER].unref();
+}
+
+const RUN_TIMED_OUT = Symbol('run timed out');
+
+/** Settles with the promise, or rejects with RUN_TIMED_OUT after `ms`. */
+function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(RUN_TIMED_OUT), ms);
+  });
+  return Promise.race([promise, deadline]).finally(() => clearTimeout(timer));
 }
 
 /** Stops the scheduler started by startDeployReport (tests, graceful shutdown). */
