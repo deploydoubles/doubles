@@ -1,12 +1,12 @@
 # Tag-driven publishing. Nothing is ever published from a local machine.
 #
-#   verifier-v<version>    -> npm package "deploydoubles", with provenance, through npm trusted
-#                             publishing (OIDC). NPM_TOKEN is needed only for the very first publish:
-#                             a trusted publisher can only be configured on a package that exists.
+#   verifier-v<version>    -> npm package "deploydoubles", staged with provenance through npm
+#                             trusted publishing (OIDC); goes live when a maintainer approves the
+#                             staged version on npm with 2FA.
 #   checks-php-v<version>  -> tag v<version> on deploydoubles/checks-php; Packagist picks it up
 #                             through its GitHub hook (needs SPLIT_TOKEN)
-#   checks-node-v<version> -> npm package "@deploydoubles/checks", published the same way as the
-#                             verifier (trusted publishing; NPM_TOKEN for the first publish only)
+#   checks-node-v<version> -> npm package "@deploydoubles/checks", staged the same way as the
+#                             verifier
 #
 # Every publishing job runs in the "release" environment, so its protection rules (who may approve, which
 # tags may deploy) gate every publish. Each secret is handed only to the one step that uses it.
@@ -55,18 +55,21 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test -- --run
-      - name: Publish to npm
-        env:
-          # First publish only. Once the trusted publisher is configured on npmjs.com
-          # (repository deploydoubles/doubles, workflow release.yml, environment release),
-          # delete the NPM_TOKEN secret: npm then authenticates with this job's OIDC token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Stage on npm
+        # The trusted publisher on npmjs.com (repository deploydoubles/doubles, workflow
+        # release.yml, environment release) allows staging only: a plain `npm publish`
+        # from here is rejected by the registry. Staging authenticates with this job's
+        # OIDC token; no npm token is stored anywhere. The staged version is invisible
+        # to installs until a maintainer approves it with 2FA.
         run: |
-          # Trusted publishing needs npm 11.5.1 or newer.
-          if [ "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" != 11.5.1 ]; then
+          # `npm stage` needs npm 11.15.0 or newer.
+          if [ "$(printf '%s\n' 11.15.0 "$(npm --version)" | sort -V | head -n1)" != 11.15.0 ]; then
             npm install --global npm@11
           fi
-          npm publish --provenance --access public
+          npm stage publish --provenance --access public
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "::notice::$name@$version is staged, not live. Approve it on npmjs.com (package → Staged) or with \`npm stage list $name\` then \`npm stage approve <stage-id>\`."
 
   checks-php:
     if: startsWith(github.ref_name, 'checks-php-v')
@@ -132,15 +135,18 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test -- --run
-      - name: Publish to npm
-        env:
-          # First publish only. Once the trusted publisher is configured on npmjs.com
-          # (repository deploydoubles/doubles, workflow release.yml, environment release),
-          # delete the NPM_TOKEN secret: npm then authenticates with this job's OIDC token.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Stage on npm
+        # The trusted publisher on npmjs.com (repository deploydoubles/doubles, workflow
+        # release.yml, environment release) allows staging only: a plain `npm publish`
+        # from here is rejected by the registry. Staging authenticates with this job's
+        # OIDC token; no npm token is stored anywhere. The staged version is invisible
+        # to installs until a maintainer approves it with 2FA.
         run: |
-          # Trusted publishing needs npm 11.5.1 or newer.
-          if [ "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" != 11.5.1 ]; then
+          # `npm stage` needs npm 11.15.0 or newer.
+          if [ "$(printf '%s\n' 11.15.0 "$(npm --version)" | sort -V | head -n1)" != 11.15.0 ]; then
             npm install --global npm@11
           fi
-          npm publish --provenance --access public
+          npm stage publish --provenance --access public
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          echo "::notice::$name@$version is staged, not live. Approve it on npmjs.com (package → Staged) or with \`npm stage list $name\` then \`npm stage approve <stage-id>\`."
