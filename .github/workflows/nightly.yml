@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
       - id: list
         run: |
-          echo "doubles=$(find doubles -mindepth 2 -maxdepth 2 -name double.json -exec dirname {} \; | xargs -n1 basename | sort | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "doubles=$(for manifest in doubles/*/double.json; do basename "$(dirname "$manifest")"; done | sort | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
 
   conformance:
     needs: doubles
@@ -42,7 +42,9 @@ jobs:
         run: npm ci && npm run build
         working-directory: verifier
       - name: Conformance
-        run: scripts/conformance.sh "${{ matrix.double }}"
+        env:
+          DOUBLE: ${{ matrix.double }}
+        run: scripts/conformance.sh "$DOUBLE"
 
   # Reserved: once catalog.json exists (written by scripts/build-catalog), a red
   # double gets "broken": true there on main. Until then the run only fails.

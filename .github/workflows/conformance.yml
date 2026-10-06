@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
         with:
           php-version: '8.4'
           extensions: pdo_mysql, pdo_sqlite, redis
@@ -73,7 +73,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          all=$(find doubles -mindepth 2 -maxdepth 2 -name double.json -exec dirname {} \; | xargs -n1 basename | sort)
+          all=$(for manifest in doubles/*/double.json; do basename "$(dirname "$manifest")"; done | sort)
           if [ -z "${BASE:-}" ]; then
             selected="$all"
           else
@@ -103,11 +103,30 @@ jobs:
         run: npm ci && npm run build
         working-directory: verifier
       - name: Conformance
-        run: scripts/conformance.sh "${{ matrix.double }}"
+        env:
+          DOUBLE: ${{ matrix.double }}
+        run: scripts/conformance.sh "$DOUBLE"
       - name: Revert control — without its worker the double must fail
+        env:
+          DOUBLE: ${{ matrix.double }}
         run: |
-          if jq -e '.processes.worker' "doubles/${{ matrix.double }}/double.json" >/dev/null; then
-            ! scripts/conformance.sh "${{ matrix.double }}" --without worker
+          if jq -e '.processes.worker' "doubles/$DOUBLE/double.json" >/dev/null; then
+            if scripts/conformance.sh "$DOUBLE" --without worker; then
+              echo "::error::$DOUBLE passed without its worker: the check that should catch that cannot fail"
+              exit 1
+            fi
           else
             echo "no worker declared; skipped"
+          fi
+      - name: Revert control — without its scheduler the double must fail
+        env:
+          DOUBLE: ${{ matrix.double }}
+        run: |
+          if jq -e '.processes.scheduler' "doubles/$DOUBLE/double.json" >/dev/null; then
+            if scripts/conformance.sh "$DOUBLE" --without scheduler; then
+              echo "::error::$DOUBLE passed without its scheduler: the check that should catch that cannot fail"
+              exit 1
+            fi
+          else
+            echo "no scheduler declared; skipped"
           fi
