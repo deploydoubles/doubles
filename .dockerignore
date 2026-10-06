@@ -1,0 +1,11 @@
+.git
+**/vendor
+**/node_modules
+**/.env
+verifier/dist
+checks/php/tests
+checks/php/composer.lock
+**/storage/logs/*.log
+**/storage/framework/cache/data
+**/storage/framework/views/*.php
+**/storage/deploy-report

@@ -1,0 +1,113 @@
+name: conformance
+
+on:
+  pull_request:
+    paths:
+      - 'doubles/**'
+      - 'checks/**'
+      - 'verifier/**'
+      - 'spec/**'
+      - 'scripts/**'
+      - '.github/workflows/conformance.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Validate examples against the schemas
+        run: |
+          npx --yes ajv-cli@5 validate -s spec/schema/report-v0.1.json -d "spec/examples/report-*.json" --spec=draft2020
+          npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "spec/examples/double-*.json" --spec=draft2020
+          npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "doubles/*/double.json" --spec=draft2020
+
+  checks-php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_mysql, pdo_sqlite, redis
+          coverage: none
+      - run: composer install --no-interaction --no-progress
+        working-directory: checks/php
+      - run: vendor/bin/pest
+        working-directory: checks/php
+
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: verifier
+      - run: npm run build
+        working-directory: verifier
+      - run: npm test -- --run
+        working-directory: verifier
+
+  changed:
+    runs-on: ubuntu-latest
+    outputs:
+      doubles: ${{ steps.pick.outputs.doubles }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: pick
+        name: Pick the doubles to run
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          all=$(find doubles -mindepth 2 -maxdepth 2 -name double.json -exec dirname {} \; | xargs -n1 basename | sort)
+          if [ -z "${BASE:-}" ]; then
+            selected="$all"
+          else
+            files=$(git diff --name-only "$BASE"...HEAD)
+            if echo "$files" | grep -qE '^(checks|verifier|spec|scripts)/|^\.github/workflows/conformance\.yml$'; then
+              selected="$all"
+            else
+              selected=$(echo "$files" | sed -nE 's#^doubles/([^/]+)/.*#\1#p' | sort -u | grep -Fx -f <(echo "$all") || true)
+            fi
+          fi
+          echo "doubles=$(echo "$selected" | jq -R . | jq -cs 'map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  double:
+    needs: [changed, verifier]
+    if: needs.changed.outputs.doubles != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        double: ${{ fromJSON(needs.changed.outputs.doubles) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build the verifier
+        run: npm ci && npm run build
+        working-directory: verifier
+      - name: Conformance
+        run: scripts/conformance.sh "${{ matrix.double }}"
+      - name: Revert control — without its worker the double must fail
+        run: |
+          if jq -e '.processes.worker' "doubles/${{ matrix.double }}/double.json" >/dev/null; then
+            ! scripts/conformance.sh "${{ matrix.double }}" --without worker
+          else
+            echo "no worker declared; skipped"
+          fi

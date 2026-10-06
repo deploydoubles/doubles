@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# Starts a double with Docker Compose and verifies it from outside.
+#
+#   scripts/conformance.sh <double> [--without <service>]... [--stop <service>]...
+#
+#   --without <service>  scale a result *producer* (worker, scheduler) to 0, so it never produces a result
+#   --stop <service>     stop a *dependency* (a database) after startup, then wait 75 s — one check
+#                        interval plus margin — so the app's next scheduled run records the failure
+#                        before the verifier reads the stored results
+#
+# The exit code is the verifier's: 0 pass, 1 a check failed, 2 pending at timeout, 3 unreachable or
+# wrong release. The stack is always torn down (docker compose down -v).
+#
+# Requires: docker compose, node >= 24, and a built verifier (cd verifier && npm ci && npm run build).
+
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  echo "usage: scripts/conformance.sh <double> [--without <service>]... [--stop <service>]..." >&2
+  exit 64
+}
+
+[ $# -ge 1 ] || usage
+double="$1"
+shift
+
+without=()
+stop=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --without) [ $# -ge 2 ] || usage; without+=("$2"); shift 2 ;;
+    --stop) [ $# -ge 2 ] || usage; stop+=("$2"); shift 2 ;;
+    *) usage ;;
+  esac
+done
+
+case "$double" in
+  */* | .* | "") usage ;;
+esac
+compose_file="$root/doubles/$double/docker-compose.yml"
+[ -f "$compose_file" ] || { echo "conformance: no docker-compose.yml for double '$double'" >&2; exit 64; }
+
+cli="$root/verifier/dist/cli.js"
+[ -f "$cli" ] || { echo "conformance: build the verifier first (cd verifier && npm ci && npm run build)" >&2; exit 64; }
+
+export REVISION="${REVISION:-$(git -C "$root" rev-parse HEAD)}"
+port="${DD_PORT:-8080}"
+export DD_PORT="$port"
+project="dd-conformance-${double}"
+
+compose=(docker compose --project-name "$project" --file "$compose_file")
+
+cleanup() {
+  "${compose[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+up_args=(up --detach --wait --wait-timeout 600 --build)
+for service in ${without[@]+"${without[@]}"}; do
+  up_args+=(--scale "$service=0")
+done
+
+echo "conformance: starting $double at $REVISION${without[*]:+ without ${without[*]}}" >&2
+"${compose[@]}" "${up_args[@]}" >&2
+
+if [ ${#stop[@]} -gt 0 ]; then
+  for service in "${stop[@]}"; do
+    echo "conformance: stopping $service" >&2
+    "${compose[@]}" stop "$service" >&2
+  done
+  echo "conformance: waiting 75 s for the next scheduled run to record it" >&2
+  sleep 75
+fi
+
+set +e
+node "$cli" verify "http://localhost:$port" --commit "$REVISION" --timeout 180 --json
+code=$?
+set -e
+
+if [ "$code" -ne 0 ]; then
+  echo "conformance: verifier exited $code; recent logs:" >&2
+  "${compose[@]}" logs --no-color --tail 40 >&2 || true
+fi
+
+exit "$code"
