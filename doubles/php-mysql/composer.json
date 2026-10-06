@@ -1,0 +1,21 @@
+{
+    "name": "deploydoubles/php-mysql",
+    "type": "project",
+    "description": "Deploy Doubles reference app: plain PHP (no framework) with MySQL and a cron job.",
+    "keywords": ["deploydoubles", "php"],
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3",
+        "ext-pdo_mysql": "*",
+        "deploydoubles/checks-php": "^0.1"
+    },
+    "autoload": {
+        "files": ["src/app.php"]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

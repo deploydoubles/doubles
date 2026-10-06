@@ -2,7 +2,7 @@
 
 Generates the [deploy report](https://github.com/deploydoubles/doubles/blob/main/spec/report.md) — `GET /.well-known/deploy-report` — for PHP applications, so a pipeline, an agent or a monitor can tell whether a deploy actually works.
 
-Laravel and Symfony are supported today. Plain PHP follows.
+Laravel, Symfony and plain PHP (no framework) are supported.
 
 > This package is developed in the [`deploydoubles/doubles`](https://github.com/deploydoubles/doubles) monorepo. Its own repository is a read-only mirror; open issues and pull requests in the monorepo.
 
@@ -53,6 +53,46 @@ deploy_report:
 ```
 
 `token` and `run_id` default to `DEPLOY_REPORT_TOKEN` and `DEPLOY_RUN_ID`. Without `checks`, they are inferred from the container (a Doctrine connection, the probe transport). `store_path` and `storage_marker_path` default to `var/deploy-report` and `var/storage/deploy-report`; share both between the web process, the worker and the cron job. The `database` check uses the Doctrine DBAL connection (`connection`, default `default`) and, when DoctrineMigrationsBundle is installed, reports pending migrations.
+
+## Install (plain PHP)
+
+```sh
+composer require deploydoubles/checks-php
+```
+
+Commit a `deploy-report.php` in the app root (the directory that holds `vendor/`) that returns an array:
+
+```php
+<?php
+
+return [
+    'tier' => 'public',   // a literal; never read it from the environment
+    'checks' => [
+        'database' => ['expected' => 'mysql'],
+        'scheduler' => [],
+        'scheduler.release' => [],
+        'storage' => [],
+        'env' => ['required' => ['APP_ENV']],
+    ],
+    // Your own connection, as a closure: called by the cron runner only, never per request.
+    'database' => fn (): PDO => new PDO(/* ... */),
+];
+```
+
+Route the report from your front controller, and run the checks from cron:
+
+```php
+if (parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/.well-known/deploy-report') {
+    DeployDoubles\Checks\serve();
+    return;
+}
+```
+
+```cron
+* * * * * cd /path/to/app && php vendor/bin/deploy-report-run
+```
+
+Cron jobs usually get no environment variables: if your app reads them from a `.env` file, load it at the top of `deploy-report.php`. `token` and `run_id` default to `DEPLOY_REPORT_TOKEN` and `DEPLOY_RUN_ID`; `store_path` and `storage_marker_path` default to `storage/deploy-report` and `storage/app/deploy-report`, which must be shared by the web server and cron. There is no queue check without a framework.
 
 ## Configure (Laravel)
 

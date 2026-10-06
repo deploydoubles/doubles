@@ -1,0 +1,2 @@
+# The one scheduled job: run the deploy report checks every minute, from the app root.
+* * * * * php vendor/bin/deploy-report-run

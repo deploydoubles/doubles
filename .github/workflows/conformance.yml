@@ -106,27 +106,36 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
-      - name: Revert control — without its worker the double must fail
+      - name: Revert control — without its result producer the double must fail
         env:
           DOUBLE: ${{ matrix.double }}
         run: |
+          # The worker when one is declared; otherwise a cron service, if the Compose file has one.
+          services=$(docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services)
           if jq -e '.processes.worker' "doubles/$DOUBLE/double.json" >/dev/null; then
-            if scripts/conformance.sh "$DOUBLE" --without worker; then
-              echo "::error::$DOUBLE passed without its worker: the check that should catch that cannot fail"
+            control=worker
+          elif printf '%s\n' "$services" | grep -qx cron; then
+            control=cron
+          else
+            control=""
+          fi
+          if [ -n "$control" ]; then
+            if scripts/conformance.sh "$DOUBLE" --without "$control"; then
+              echo "::error::$DOUBLE passed without its $control: the check that should catch that cannot fail"
               exit 1
             fi
           else
-            echo "no worker declared; skipped"
+            echo "no worker or cron service; skipped"
           fi
       - name: Revert control — without its scheduler the double must fail
         env:
           DOUBLE: ${{ matrix.double }}
         run: |
-          if jq -e '.processes.scheduler' "doubles/$DOUBLE/double.json" >/dev/null; then
+          if docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services | grep -qx scheduler; then
             if scripts/conformance.sh "$DOUBLE" --without scheduler; then
               echo "::error::$DOUBLE passed without its scheduler: the check that should catch that cannot fail"
               exit 1
             fi
           else
-            echo "no scheduler declared; skipped"
+            echo "no scheduler service (cron doubles are covered above); skipped"
           fi

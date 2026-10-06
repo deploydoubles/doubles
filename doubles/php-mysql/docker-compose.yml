@@ -1,0 +1,75 @@
+# Reference setup for the conformance run (scripts/conformance.sh).
+# Builds from the monorepo root so the checks library under test is the one
+# in this working tree (MONOREPO=1).
+
+name: dd-php-mysql
+
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: doubles/php-mysql/docker/Dockerfile
+    args:
+      APP_DIR: doubles/php-mysql
+      MONOREPO: "1"
+      REVISION: ${REVISION:-}
+  image: deploydoubles-conformance/php-mysql:local
+  volumes:
+    - storage:/app/storage
+
+services:
+  app:
+    <<: *app
+    environment:
+      APP_ENV: production
+    ports:
+      - "${DD_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/up') === false ? 1 : 0);"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  # What a platform's cron does with the committed crontab:
+  # `* * * * * php vendor/bin/deploy-report-run`, from the app root. Like a
+  # cron job, it gets no environment variables: the app reads them from the
+  # .env file a platform writes into the app root.
+  cron:
+    <<: *app
+    command: ["sh", "-c", "while :; do php vendor/bin/deploy-report-run; sleep $$((60 - $$(date +%s) % 60)); done"]
+    configs:
+      - source: dotenv
+        target: /app/.env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: double
+      MYSQL_USER: double
+      MYSQL_PASSWORD: double
+      MYSQL_ROOT_PASSWORD: double-root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-udouble", "-pdouble"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+configs:
+  dotenv:
+    # Discrete variables (DATABASE_URL works too).
+    content: |
+      APP_ENV=production
+      DB_CONNECTION=mysql
+      DB_HOST=mysql
+      DB_PORT=3306
+      DB_DATABASE=double
+      DB_USERNAME=double
+      DB_PASSWORD=double
+
+volumes:
+  storage:
