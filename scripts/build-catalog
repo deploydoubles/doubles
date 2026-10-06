@@ -1,0 +1,83 @@
+#!/usr/bin/env node
+//
+// Generates catalog.json from every doubles/<id>/double.json. Never edit
+// catalog.json by hand: this script is its only writer.
+//
+//   scripts/build-catalog                  regenerate; keep each double's current "broken" flag
+//   scripts/build-catalog --broken a,b     regenerate; mark exactly these doubles broken (nightly)
+//   scripts/build-catalog --check          exit 1 when catalog.json is not what this script would write
+//
+// Each entry is the double's manifest (without "$schema"), its read-only
+// repository URL and the "broken" flag the nightly conformance run sets.
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const root = path.resolve(__dirname, '..');
+const catalogPath = path.join(root, 'catalog.json');
+const ORG = 'deploydoubles';
+
+function usage() {
+  process.stderr.write('usage: scripts/build-catalog [--broken <id,...>] [--check]\n');
+  process.exit(64);
+}
+
+const args = process.argv.slice(2);
+let check = false;
+let broken = null;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--check') check = true;
+  else if (args[i] === '--broken' && i + 1 < args.length) broken = new Set(args[++i].split(',').map((id) => id.trim()).filter(Boolean));
+  else usage();
+}
+
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+const current = fs.existsSync(catalogPath) ? readJson(catalogPath) : { doubles: [] };
+const wasBroken = new Set((current.doubles || []).filter((d) => d.broken === true).map((d) => d.id));
+
+const ids = fs
+  .readdirSync(path.join(root, 'doubles'), { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(root, 'doubles', entry.name, 'double.json')))
+  .map((entry) => entry.name)
+  .sort();
+
+if (broken !== null) {
+  for (const id of broken) {
+    if (!ids.includes(id)) {
+      process.stderr.write(`build-catalog: unknown double "${id}"\n`);
+      process.exit(1);
+    }
+  }
+}
+
+const doubles = ids.map((id) => {
+  const { $schema, ...manifest } = readJson(path.join(root, 'doubles', id, 'double.json'));
+  if (manifest.id !== id) {
+    process.stderr.write(`build-catalog: doubles/${id}/double.json has id "${manifest.id}"\n`);
+    process.exit(1);
+  }
+  return {
+    ...manifest,
+    repository: `https://github.com/${ORG}/${id}`,
+    broken: broken !== null ? broken.has(id) : wasBroken.has(id),
+  };
+});
+
+const output = JSON.stringify({ catalog_version: '0.1', doubles }, null, 2) + '\n';
+
+if (check) {
+  const existing = fs.existsSync(catalogPath) ? fs.readFileSync(catalogPath, 'utf8') : '';
+  if (existing !== output) {
+    process.stderr.write('build-catalog: catalog.json is out of date or was edited by hand; run scripts/build-catalog and commit the result\n');
+    process.exit(1);
+  }
+  process.stdout.write(`catalog.json is current (${doubles.length} doubles)\n`);
+} else {
+  fs.writeFileSync(catalogPath, output);
+  process.stdout.write(`catalog.json: ${doubles.length} doubles${doubles.some((d) => d.broken) ? `, broken: ${doubles.filter((d) => d.broken).map((d) => d.id).join(', ')}` : ''}\n`);
+}

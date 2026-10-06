@@ -64,9 +64,17 @@ describe.skipIf(!built && !process.env.CI)('cli (built)', () => {
     expect(code).toBe(0);
   });
 
-  it('list is an empty stub for now', async () => {
-    const { code, stdout } = await cli(['list', '--json']);
+  it('lists the doubles with every need from a local catalog', async () => {
+    const catalog = new URL('./fixtures/catalog.json', import.meta.url).pathname;
+    const { code, stdout, stderr } = await cli(['list', '--needs', 'postgres,worker', '--json', '--catalog', catalog]);
     expect(code).toBe(0);
-    expect(JSON.parse(stdout)).toEqual({ doubles: [] });
+    expect(stderr).toBe('');
+    expect(JSON.parse(stdout).doubles.map((d: { id: string }) => d.id)).toEqual(['symfony-postgres-worker']);
+  });
+
+  it('exits 3 when the catalog cannot be read', async () => {
+    const { code, stdout } = await cli(['list', '--json', '--catalog', '/nonexistent/catalog.json']);
+    expect(code).toBe(3);
+    expect(JSON.parse(stdout)).toMatchObject({ doubles: [] });
   });
 });

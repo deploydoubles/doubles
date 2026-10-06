@@ -1,0 +1,251 @@
+{
+  "catalog_version": "0.1",
+  "doubles": [
+    {
+      "spec_version": "0.1",
+      "id": "laravel-mysql-redis-worker",
+      "description": "Laravel with MySQL, Redis for cache and queue, a queue worker and the scheduler.",
+      "framework": {
+        "name": "laravel",
+        "version": "^13.0"
+      },
+      "runtime": {
+        "name": "php",
+        "version": ">=8.3"
+      },
+      "services": {
+        "database": "mysql",
+        "cache": "redis",
+        "queue": "redis"
+      },
+      "processes": {
+        "web": {
+          "command": "php artisan serve --host=0.0.0.0 --port=8080 --no-reload"
+        },
+        "worker": {
+          "command": "php artisan queue:work --sleep=1 --tries=1"
+        },
+        "scheduler": {
+          "command": "php artisan schedule:work"
+        }
+      },
+      "env": {
+        "required": [
+          "APP_KEY"
+        ],
+        "generated": [
+          "APP_KEY"
+        ]
+      },
+      "build": [
+        "composer install --no-dev --optimize-autoloader"
+      ],
+      "release": [
+        "php artisan migrate --force"
+      ],
+      "expects": {
+        "inside": [
+          "database",
+          "cache",
+          "queue",
+          "queue.release",
+          "scheduler",
+          "scheduler.release",
+          "storage",
+          "env"
+        ],
+        "outside": [
+          "reachability",
+          "tls",
+          "https_redirect",
+          "release",
+          "run_id",
+          "downtime",
+          "rollback",
+          "persistence",
+          "detection"
+        ]
+      },
+      "failure_modes": [],
+      "repository": "https://github.com/deploydoubles/laravel-mysql-redis-worker",
+      "broken": false
+    },
+    {
+      "spec_version": "0.1",
+      "id": "nextjs-postgres",
+      "description": "Next.js (App Router) with Postgres; checks run in-process on a timer started from instrumentation.ts.",
+      "framework": {
+        "name": "next",
+        "version": "^16.3"
+      },
+      "runtime": {
+        "name": "node",
+        "version": ">=24"
+      },
+      "services": {
+        "database": "postgres"
+      },
+      "processes": {
+        "web": {
+          "command": "npm start"
+        }
+      },
+      "env": {
+        "required": [
+          "NODE_ENV"
+        ]
+      },
+      "build": [
+        "npm ci",
+        "npm run build"
+      ],
+      "release": [],
+      "expects": {
+        "inside": [
+          "database",
+          "scheduler",
+          "scheduler.release",
+          "storage",
+          "env"
+        ],
+        "outside": [
+          "reachability",
+          "tls",
+          "https_redirect",
+          "release",
+          "run_id",
+          "downtime",
+          "rollback",
+          "persistence",
+          "detection"
+        ]
+      },
+      "failure_modes": [],
+      "repository": "https://github.com/deploydoubles/nextjs-postgres",
+      "broken": false
+    },
+    {
+      "spec_version": "0.1",
+      "id": "php-mysql",
+      "description": "Plain PHP without a framework, with MySQL and one cron job; no queue.",
+      "framework": {
+        "name": "none",
+        "version": "*"
+      },
+      "runtime": {
+        "name": "php",
+        "version": ">=8.3"
+      },
+      "services": {
+        "database": "mysql"
+      },
+      "processes": {
+        "web": {
+          "command": "php -S 0.0.0.0:8080 -t public public/index.php"
+        },
+        "scheduler": {
+          "command": "php vendor/bin/deploy-report-run"
+        }
+      },
+      "env": {
+        "required": [
+          "APP_ENV"
+        ]
+      },
+      "build": [
+        "composer install --no-dev --optimize-autoloader"
+      ],
+      "release": [],
+      "expects": {
+        "inside": [
+          "database",
+          "scheduler",
+          "scheduler.release",
+          "storage",
+          "env"
+        ],
+        "outside": [
+          "reachability",
+          "tls",
+          "https_redirect",
+          "release",
+          "run_id",
+          "downtime",
+          "rollback",
+          "persistence",
+          "detection"
+        ]
+      },
+      "failure_modes": [],
+      "repository": "https://github.com/deploydoubles/php-mysql",
+      "broken": false
+    },
+    {
+      "spec_version": "0.1",
+      "id": "symfony-postgres-worker",
+      "description": "Symfony with Postgres, a Messenger worker on the Doctrine transport, and a console command run every minute by cron.",
+      "framework": {
+        "name": "symfony",
+        "version": "8.1.*"
+      },
+      "runtime": {
+        "name": "php",
+        "version": ">=8.4"
+      },
+      "services": {
+        "database": "postgres",
+        "queue": "database"
+      },
+      "processes": {
+        "web": {
+          "command": "php -S 0.0.0.0:8080 -t public public/index.php"
+        },
+        "worker": {
+          "command": "php bin/console messenger:consume async"
+        },
+        "scheduler": {
+          "command": "php bin/console deploy-report:run"
+        }
+      },
+      "env": {
+        "required": [
+          "APP_SECRET"
+        ],
+        "generated": [
+          "APP_SECRET"
+        ]
+      },
+      "build": [
+        "composer install --no-dev --optimize-autoloader"
+      ],
+      "release": [
+        "php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration"
+      ],
+      "expects": {
+        "inside": [
+          "database",
+          "queue",
+          "queue.release",
+          "scheduler",
+          "scheduler.release",
+          "storage",
+          "env"
+        ],
+        "outside": [
+          "reachability",
+          "tls",
+          "https_redirect",
+          "release",
+          "run_id",
+          "downtime",
+          "rollback",
+          "persistence",
+          "detection"
+        ]
+      },
+      "failure_modes": [],
+      "repository": "https://github.com/deploydoubles/symfony-postgres-worker",
+      "broken": false
+    }
+  ]
+}

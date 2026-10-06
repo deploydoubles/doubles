@@ -62,7 +62,18 @@ Redirects are followed only within the origin you gave, so the token and run ID 
 
 ## list
 
-`deploydoubles list` will pick a double from the catalog. The catalog is not published yet; today it returns an empty list.
+```
+deploydoubles list [--needs <a,b>] [--catalog <path or url>] [--json]
+```
+
+Picks a double from the catalog (`catalog.json` in the monorepo, generated from every double's `double.json`). `--needs` keeps only the doubles that have all of the given names, used verbatim from the manifests: services (`postgres`, `mysql`, `redis`), service kinds (`database`, `cache`, `queue`), processes (`worker`, `scheduler`), the runtime (`php`, `node`) or the framework (`laravel`, `symfony`, `next`). An unknown name matches nothing.
+
+```sh
+npx deploydoubles list --needs postgres,worker --json
+# {"doubles":[{"id":"symfony-postgres-worker", ..., "repository":"https://github.com/deploydoubles/symfony-postgres-worker","broken":false}]}
+```
+
+The catalog is read from `https://raw.githubusercontent.com/deploydoubles/doubles/main/catalog.json` unless `--catalog` names a file or URL. A double whose own nightly conformance run fails carries `"broken": true`. Exit `0` with a list (possibly empty); exit `3` when the catalog cannot be read.
 
 ## Licence
 

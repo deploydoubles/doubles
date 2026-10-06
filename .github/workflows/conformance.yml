@@ -8,6 +8,7 @@ on:
       - 'verifier/**'
       - 'spec/**'
       - 'scripts/**'
+      - 'catalog.json'
       - '.github/workflows/conformance.yml'
   workflow_dispatch:
 
@@ -31,6 +32,8 @@ jobs:
           npx --yes ajv-cli@5 validate -s spec/schema/report-v0.1.json -d "spec/examples/report-*.json" --spec=draft2020
           npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "spec/examples/double-*.json" --spec=draft2020
           npx --yes ajv-cli@5 validate -s spec/schema/manifest-v0.1.json -d "doubles/*/double.json" --spec=draft2020
+      - name: catalog.json is generated, never hand-edited
+        run: scripts/build-catalog --check
 
   checks-php:
     runs-on: ubuntu-latest

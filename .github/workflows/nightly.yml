@@ -45,20 +45,61 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
+      - name: Record the result
+        if: always()
+        env:
+          DOUBLE: ${{ matrix.double }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          mkdir -p results
+          if [ "$JOB_STATUS" = "success" ]; then echo green > "results/$DOUBLE"; else echo red > "results/$DOUBLE"; fi
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: result-${{ matrix.double }}
+          path: results/${{ matrix.double }}
+          retention-days: 7
 
-  # Reserved: once catalog.json exists (written by scripts/build-catalog), a red
-  # double gets "broken": true there on main. Until then the run only fails.
+  # A red double gets "broken": true in catalog.json on main, a green one
+  # false. scripts/build-catalog stays the only writer of the file.
   mark-broken:
-    needs: conformance
-    if: failure()
+    needs: [doubles, conformance]
+    if: always() && needs.doubles.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
       - name: Mark broken doubles in catalog.json
+        env:
+          DOUBLES: ${{ needs.doubles.outputs.doubles }}
         run: |
-          if [ ! -f catalog.json ]; then
-            echo "catalog.json does not exist yet; nothing to mark. See the failed conformance jobs."
-            exit 1
+          broken=""
+          for id in $(echo "$DOUBLES" | jq -r '.[]'); do
+            # No result file (the job was cancelled or crashed) counts as red.
+            if [ "$(cat "results/$id" 2>/dev/null)" != "green" ]; then
+              broken="${broken:+$broken,}$id"
+            fi
+          done
+          scripts/build-catalog --broken "$broken"
+          if git diff --quiet catalog.json; then
+            echo "catalog.json unchanged."
+            exit 0
           fi
-          echo "::error::catalog.json exists but marking broken doubles is not implemented yet."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(catalog): nightly broken flags${broken:+ ($broken)}" catalog.json
+          git push origin HEAD:main
+      - name: Fail the run when a double is red
+        if: needs.conformance.result != 'success'
+        run: |
+          echo "::error::At least one double failed its nightly conformance run; see the conformance jobs."
           exit 1
