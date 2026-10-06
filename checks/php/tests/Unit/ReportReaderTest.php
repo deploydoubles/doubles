@@ -60,16 +60,20 @@ it('reports only scheduler fail when stored results are older than 180 s', funct
         ->and($report['deploy']['settled'])->toBeTrue();
 });
 
-it('keeps results that are 180 s old', function () {
+it('keeps results that are exactly 180 s old', function () {
     $dir = tempDir();
     $store = new FileStore($dir);
     $config = readerConfig($dir);
     $clock = new FakeClock();
 
     runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, COMMIT, $clock->now));
-    $clock->advance(100);
+    $clock->advance(ReportReader::STALE_AFTER);
 
     expect(readReport($store, $config, $clock)['deploy']['checks'])->toHaveKeys(['database', 'queue']);
+
+    $clock->advance(1);
+
+    expect(array_keys(readReport($store, $config, $clock)['deploy']['checks']))->toBe(['scheduler']);
 });
 
 it('is pending before the first scheduled run and fails once 120 s pass without a heartbeat', function () {
@@ -152,6 +156,103 @@ it('fails queue against the oldest unanswered probe even while fresh probes keep
         ->and($report['deploy']['checks']['queue']['code'])->toBe('queue_no_worker')
         ->and($report['deploy']['checks']['queue.release']['status'])->toBe('fail')
         ->and($report['deploy']['settled'])->toBeTrue();
+});
+
+it('does not fail the queue on one lost probe while later probes are answered', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    runOnce($store, $config, $clock); // this probe is lost: the job failed or was dropped
+    $clock->advance(60);
+    foreach (range(1, 4) as $minute) {
+        runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, COMMIT, $clock->now));
+        $clock->advance(60);
+    }
+
+    expect(readReport($store, $config, $clock)['deploy']['checks']['queue']['status'])->toBe('pass');
+});
+
+it('still fails the queue when probes dispatched after the last answered one wait too long', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, COMMIT, $clock->now));
+    $clock->advance(60);
+    // The worker dies.
+    foreach (range(1, 3) as $minute) {
+        runOnce($store, $config, $clock);
+        $clock->advance(60);
+    }
+
+    expect(readReport($store, $config, $clock)['deploy']['checks']['queue']['code'])->toBe('queue_no_worker');
+});
+
+it('creates the boot marker without hard links, once', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir, static fn (string $target, string $path): bool => false);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    $first = readReport($store, $config, $clock);
+    $clock->advance(30);
+    $second = readReport($store, $config, $clock);
+
+    expect($store->read(Store::boot(COMMIT)))->toBe(['at' => 1_800_000_000])
+        ->and($first['deploy']['release']['booted_at'])->toBe(gmdate('Y-m-d\TH:i:s\Z', 1_800_000_000))
+        ->and($second['deploy']['release']['booted_at'])->toBe(gmdate('Y-m-d\TH:i:s\Z', 1_800_000_000))
+        ->and(glob($dir.'/*'))->toBe([$dir.'/boot-'.COMMIT.'.json']);
+
+    $clock->advance(100);
+    expect(readReport($store, $config, $clock)['deploy']['checks']['scheduler']['code'])->toBe('scheduler_not_running');
+});
+
+it('fails with a fixed code instead of staying pending when no boot marker can be stored', function () {
+    $file = tempnam(sys_get_temp_dir(), 'dd-file');
+    $store = new FileStore($file.'/store'); // a directory below a regular file can never be created
+    $config = readerConfig($file);
+    $clock = new FakeClock();
+
+    // The store suppresses the filesystem warning with @; PHPUnit records suppressed warnings anyway.
+    set_error_handler(static fn (): bool => true);
+    try {
+        $report = readReport($store, $config, $clock);
+    } finally {
+        restore_error_handler();
+    }
+
+    expect(array_keys($report['deploy']['checks']))->toBe(['scheduler'])
+        ->and($report['deploy']['checks']['scheduler']['status'])->toBe('fail')
+        ->and($report['deploy']['checks']['scheduler']['code'])->toBe('report_store_unwritable')
+        ->and($report['deploy']['settled'])->toBeTrue()
+        ->and($report['status'])->toBe('fail');
+});
+
+it('hands the error class, never its message, to the warn hook when a check throws', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $warnings = [];
+
+    (new Runner(
+        $store,
+        $config,
+        COMMIT,
+        ['database' => fn () => throw new \PDOException('SQLSTATE[HY000] [2002] secret-host.internal refused leaky_user')],
+        warn: function (string $message) use (&$warnings): void {
+            $warnings[] = $message;
+        },
+    ))->run();
+
+    expect($warnings)->toHaveCount(1)
+        ->and($warnings[0])->toContain('database')
+        ->and($warnings[0])->toContain('PDOException')
+        ->and($warnings[0])->not->toContain('secret-host')
+        ->and($warnings[0])->not->toContain('leaky_user')
+        ->and($warnings[0])->not->toContain('SQLSTATE');
 });
 
 it('fails scheduler.release when two releases run the scheduler in the same minute', function () {

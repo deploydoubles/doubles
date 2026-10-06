@@ -21,13 +21,20 @@ final class Runner
     private const PROBE_TTL = 900;
     private const OTHER_RELEASE_TTL = 3600;
 
+    /**
+     * A release whose last run is older than this (more than one missed
+     * minute), while another release started in between, has come back:
+     * a rollback or a redeploy of a commit that ran before.
+     */
+    private const RETURN_GAP = 90;
+
     /** @var Closure(): int */
     private Closure $clock;
 
     /**
      * @param array<string, Closure(): CheckResult> $checks run-time check implementations by name
      * @param (Closure(string): void)|null $dispatchProbe dispatches a probe job carrying the probe's store name
-     * @param (Closure(string): void)|null $warn receives configuration warnings (never secrets)
+     * @param (Closure(string): void)|null $warn receives configuration warnings and the class of a check error (never a message or a secret)
      */
     public function __construct(
         private readonly FileStore $store,
@@ -45,6 +52,12 @@ final class Runner
     public function run(): array
     {
         $now = ($this->clock)();
+        $previous = $this->store->read(Store::results($this->commit));
+        if ($this->isReturning($previous, $now)) {
+            $this->forgetEarlierLife();
+            $previous = null;
+        }
+        $since = is_int($previous['since'] ?? null) ? $previous['since'] : $now;
         $this->store->createIfAbsent(Store::boot($this->commit), ['at' => $now]);
 
         $warning = (new TierFilter($this->config))->configurationWarning();
@@ -66,6 +79,7 @@ final class Runner
                 $results[$name] = $check()->withCheckedAt($now);
             } catch (Throwable $e) {
                 $results[$name] = CheckResult::fail(ErrorMapper::map($name, $e), checkedAt: $now);
+                $this->reportError($name, $e);
             }
         }
 
@@ -77,11 +91,13 @@ final class Runner
             } catch (Throwable $e) {
                 $this->store->delete(Store::probe($this->commit, $id));
                 $results['queue'] = CheckResult::fail(Codes::QUEUE_ERROR, 'the probe job could not be dispatched', $results['queue']->expected, $results['queue']->observed, $now);
+                $this->reportError('queue', $e);
             }
         }
 
         $this->store->write(Store::results($this->commit), [
             'commit' => Store::key($this->commit),
+            'since' => $since,
             'ran_at' => $now,
             'checks' => array_map(static fn (CheckResult $r) => $r->toStore(), $results),
         ]);
@@ -90,6 +106,67 @@ final class Runner
         $this->prune($now);
 
         return $results;
+    }
+
+    /**
+     * Whether the stored state for this commit belongs to an earlier life of
+     * the release: a rollback to it, or a redeploy of it. Its results, probes,
+     * heartbeat and boot marker then describe a different deployment and must
+     * not be read as this one's.
+     *
+     * @param array<string, mixed>|null $results this commit's stored results
+     */
+    private function isReturning(?array $results, int $now): bool
+    {
+        if ($results !== null) {
+            $ranAt = is_int($results['ran_at'] ?? null) ? $results['ran_at'] : 0;
+            if ($now - $ranAt > ReportReader::STALE_AFTER) {
+                return true;
+            }
+            if ($now - $ranAt <= self::RETURN_GAP) {
+                return false;
+            }
+            // Another release started after this one last ran: it was replaced, and is back.
+            $own = Store::results($this->commit);
+            foreach ($this->store->names('results-') as $name) {
+                if ($name === $own) {
+                    continue;
+                }
+                $other = $this->store->read($name);
+                if (is_int($other['since'] ?? null) && $other['since'] > $ranAt) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // No results, but state left over from an earlier life of this commit.
+        if ($this->store->read(Store::heartbeat($this->commit)) !== null
+            || $this->store->names(Store::probePrefix($this->commit)) !== []) {
+            return true;
+        }
+        $boot = $this->store->read(Store::boot($this->commit));
+
+        return is_int($boot['at'] ?? null) && $now - $boot['at'] > ReportReader::STALE_AFTER;
+    }
+
+    /** Clears this commit's heartbeat (and with it the takeover minute), probes and boot marker. */
+    private function forgetEarlierLife(): void
+    {
+        $this->store->delete(Store::heartbeat($this->commit));
+        $this->store->delete(Store::boot($this->commit));
+        foreach ($this->store->names(Store::probePrefix($this->commit)) as $name) {
+            $this->store->delete($name);
+        }
+    }
+
+    /** Hands the error's class — never its message — to the warn hook, so "check the app's logs" is true. */
+    private function reportError(string $check, Throwable $e): void
+    {
+        if ($this->warn !== null) {
+            ($this->warn)(sprintf('deploy-report: the %s check failed with %s.', $check, $e::class));
+        }
     }
 
     private function heartbeat(int $now): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DeployDoubles\Checks;
 
+use Closure;
 use RuntimeException;
 
 /**
@@ -17,8 +18,19 @@ final class FileStore
 {
     private const NAME = '/^[a-z0-9][a-z0-9._-]*$/';
 
-    public function __construct(private readonly string $directory)
+    /** A marker file that exists but stays unreadable this long is treated as lost. */
+    private const PARTIAL_WRITE_GRACE = 5;
+
+    /** @var Closure(string, string): bool */
+    private Closure $link;
+
+    /**
+     * @param (Closure(string, string): bool)|null $link creates a hard link; replaceable so the
+     *        fallback for filesystems without hard links can be tested
+     */
+    public function __construct(private readonly string $directory, ?Closure $link = null)
     {
+        $this->link = $link ?? static fn (string $target, string $path): bool => @link($target, $path);
     }
 
     public function directory(): string
@@ -43,32 +55,62 @@ final class FileStore
     }
 
     /**
-     * Creates the file only when it does not exist yet. Returns the stored data.
+     * Creates the file only when it does not exist yet, atomically: the first
+     * writer wins. Returns the stored data, or null when nothing could be
+     * stored (an unwritable store), so the caller can say so instead of
+     * trying again on every request.
      *
      * @param array<string, mixed> $data
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    public function createIfAbsent(string $name, array $data): array
+    public function createIfAbsent(string $name, array $data): ?array
     {
         $existing = $this->read($name);
         if ($existing !== null) {
             return $existing;
         }
 
+        $path = $this->path($name);
         try {
             $this->ensureDirectory();
-            $path = $this->path($name);
+            $json = json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             $temp = $path.'.'.bin2hex(random_bytes(6)).'.tmp';
-            if (@file_put_contents($temp, json_encode($data, JSON_THROW_ON_ERROR)) !== false) {
+            if (@file_put_contents($temp, $json) !== false) {
                 // link() fails when the target exists, so the first writer wins atomically.
-                @link($temp, $path);
+                $linked = ($this->link)($temp, $path);
                 @unlink($temp);
+                if (! $linked && ! is_file($path)) {
+                    // No hard links on this filesystem: an exclusive create is
+                    // just as first-writer-wins, only not atomic for readers.
+                    $this->createExclusive($path, $json);
+                }
             }
         } catch (\Throwable) {
-            // A read-only store degrades to "no marker": callers treat that as unknown.
+            // Nothing could be stored; the read below says so.
         }
 
-        return $this->read($name) ?? $data;
+        $stored = $this->read($name);
+        if ($stored !== null) {
+            return $stored;
+        }
+
+        // Another writer may be half-way through an exclusive create.
+        $age = $this->age($name, time());
+
+        return $age !== null && $age <= self::PARTIAL_WRITE_GRACE ? $data : null;
+    }
+
+    private function createExclusive(string $path, string $json): void
+    {
+        $handle = @fopen($path, 'x');
+        if ($handle === false) {
+            return;
+        }
+        try {
+            @fwrite($handle, $json);
+        } finally {
+            @fclose($handle);
+        }
     }
 
     /** @return array<string, mixed>|null */
@@ -98,7 +140,7 @@ final class FileStore
             return [];
         }
         $names = [];
-        foreach (scandir($this->directory) ?: [] as $entry) {
+        foreach (@scandir($this->directory) ?: [] as $entry) {
             if (str_starts_with($entry, $prefix) && str_ends_with($entry, '.json')) {
                 $names[] = substr($entry, 0, -5);
             }

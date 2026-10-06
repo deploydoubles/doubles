@@ -10,6 +10,13 @@ use Closure;
  * Builds the full report from the result store. It only reads: it never runs
  * a check, dispatches a job or touches a backing service. The one write it
  * may make is the release's boot marker, once, when the store has none.
+ *
+ * Every `checked_at` is the time of the evidence a result rests on — when the
+ * scheduled run produced it, or when the record it was derived from was
+ * written — never the time of the request. A verifier can therefore tell a
+ * result produced by this deployment from one left by an earlier life of the
+ * same commit (a rollback or a redeploy) that the scheduler has not yet
+ * replaced.
  */
 final class ReportReader
 {
@@ -40,10 +47,12 @@ final class ReportReader
         $results = $this->store->read(Store::results($this->commit));
 
         if ($results !== null && $now - (int) ($results['ran_at'] ?? 0) > self::STALE_AFTER) {
+            $ranAt = (int) ($results['ran_at'] ?? 0);
+
             return $this->build(['scheduler' => CheckResult::fail(
                 Codes::SCHEDULER_RESULTS_STALE,
-                'last scheduled run '.($now - (int) ($results['ran_at'] ?? 0)).' s ago',
-                checkedAt: $now,
+                'last scheduled run '.($now - $ranAt).' s ago',
+                checkedAt: $ranAt,
             )], $now);
         }
 
@@ -57,7 +66,7 @@ final class ReportReader
         foreach (array_keys($this->config->checks) as $name) {
             $checks[$name] = match ($name) {
                 'queue', 'queue.release' => null, // evaluated together below
-                'scheduler' => $this->scheduler($now),
+                'scheduler' => $this->scheduler($now, (int) ($results['ran_at'] ?? $now)),
                 'scheduler.release' => $this->schedulerRelease($now),
                 default => isset($stored[$name]) && is_array($stored[$name])
                     ? CheckResult::fromStore($stored[$name])
@@ -82,6 +91,15 @@ final class ReportReader
     private function beforeFirstRun(int $now): Report
     {
         $boot = $this->bootedAt($now);
+        if ($boot === null) {
+            // Without a boot marker the scheduler's grace has no start, and a
+            // report that stayed pending would hide a dead scheduler forever.
+            return $this->build(['scheduler' => CheckResult::fail(
+                Codes::REPORT_STORE_UNWRITABLE,
+                'the result store could not be written',
+                checkedAt: $now,
+            )], $now);
+        }
         $age = $now - $boot;
 
         if ($age > self::SCHEDULER_GRACE) {
@@ -104,20 +122,20 @@ final class ReportReader
         return $this->build($checks, $now);
     }
 
-    private function scheduler(int $now): CheckResult
+    private function scheduler(int $now, int $ranAt): CheckResult
     {
         $heartbeat = $this->store->read(Store::heartbeat($this->commit));
         $at = is_int($heartbeat['at'] ?? null) ? $heartbeat['at'] : null;
 
         if ($at === null) {
-            return CheckResult::fail(Codes::SCHEDULER_NOT_RUNNING, 'no heartbeat from this release', checkedAt: $now);
+            return CheckResult::fail(Codes::SCHEDULER_NOT_RUNNING, 'no heartbeat from this release', checkedAt: $ranAt);
         }
         $age = max(0, $now - $at);
         if ($age > self::SCHEDULER_GRACE) {
-            return CheckResult::fail(Codes::SCHEDULER_NOT_RUNNING, 'last heartbeat '.$age.' s ago', checkedAt: $now);
+            return CheckResult::fail(Codes::SCHEDULER_NOT_RUNNING, 'last heartbeat '.$age.' s ago', checkedAt: $at);
         }
 
-        return CheckResult::pass('last heartbeat '.$age.' s ago', checkedAt: $now);
+        return CheckResult::pass('last heartbeat '.$age.' s ago', checkedAt: $at);
     }
 
     private function schedulerRelease(int $now): CheckResult
@@ -126,6 +144,7 @@ final class ReportReader
         if ($own === null) {
             return CheckResult::pending(30, 'waiting for the first heartbeat', $now);
         }
+        $at = is_int($own['at'] ?? null) ? $own['at'] : $now;
 
         $first = is_int($own['first_minute'] ?? null) ? $own['first_minute'] : null;
         // The minute this release took over may legitimately contain the
@@ -146,15 +165,21 @@ final class ReportReader
                 return CheckResult::fail(
                     Codes::SCHEDULER_RELEASE_MISMATCH,
                     'heartbeats from more than one commit in the same minute',
-                    checkedAt: $now,
+                    checkedAt: $at,
                 );
             }
         }
 
-        return CheckResult::pass('heartbeats in each minute come from one commit', checkedAt: $now);
+        return CheckResult::pass('heartbeats in each minute come from one commit', checkedAt: $at);
     }
 
     /**
+     * `queue` and `queue.release`, judged against this release's probes.
+     *
+     * Only probes dispatched after the newest answered probe count as
+     * outstanding: a worker that answered a later probe is alive, so one probe
+     * lost on the way (a failed or dropped job) does not fail the queue.
+     *
      * @return array{0: CheckResult, 1: CheckResult}
      */
     private function queue(?CheckResult $config, int $now): array
@@ -163,33 +188,45 @@ final class ReportReader
         $observed = $config?->observed;
 
         if ($config !== null && $config->status === Status::Fail) {
-            return [$config->withCheckedAt($now), new CheckResult(Status::Skip, checkedAt: $now)];
+            // The queue check itself failed (wrong backend, no dispatch): no
+            // probe can say which release a worker runs, so the release is skipped.
+            $at = $config->checkedAt ?? $now;
+
+            return [$config->withCheckedAt($at), new CheckResult(Status::Skip, checkedAt: $at)];
         }
 
-        $outstanding = [];
+        $probes = [];
         $answered = null;
         foreach ($this->store->names(Store::probePrefix($this->commit)) as $name) {
             $probe = $this->store->read($name);
             if ($probe === null || ! is_int($probe['dispatched_at'] ?? null)) {
                 continue;
             }
-            if (is_int($probe['answered_at'] ?? null)) {
-                if ($answered === null || $probe['answered_at'] > $answered['answered_at']) {
-                    $answered = $probe;
-                }
-            } else {
+            $probes[] = $probe;
+            if (is_int($probe['answered_at'] ?? null)
+                && ($answered === null
+                    || $probe['dispatched_at'] > $answered['dispatched_at']
+                    || ($probe['dispatched_at'] === $answered['dispatched_at'] && $probe['answered_at'] > $answered['answered_at']))) {
+                $answered = $probe;
+            }
+        }
+
+        $outstanding = [];
+        foreach ($probes as $probe) {
+            if (! is_int($probe['answered_at'] ?? null) && ($answered === null || $probe['dispatched_at'] > $answered['dispatched_at'])) {
                 $outstanding[] = $probe['dispatched_at'];
             }
         }
 
-        $oldestAge = $outstanding === [] ? null : $now - min($outstanding);
+        $oldest = $outstanding === [] ? null : min($outstanding);
+        $oldestAge = $oldest === null ? null : $now - $oldest;
 
-        if ($oldestAge !== null && $oldestAge > self::QUEUE_GRACE) {
+        if ($oldest !== null && $oldestAge > self::QUEUE_GRACE) {
             $detail = 'oldest unanswered probe has waited '.$oldestAge.' s';
 
             return [
-                CheckResult::fail(Codes::QUEUE_NO_WORKER, $detail, $expected, $observed, $now),
-                CheckResult::fail(Codes::QUEUE_NO_WORKER, $detail, checkedAt: $now),
+                CheckResult::fail(Codes::QUEUE_NO_WORKER, $detail, $expected, $observed, $oldest),
+                CheckResult::fail(Codes::QUEUE_NO_WORKER, $detail, checkedAt: $oldest),
             ];
         }
 
@@ -200,23 +237,28 @@ final class ReportReader
             return [$pending->withExpectation($expected, $observed), $pending];
         }
 
+        $at = $answered['answered_at'];
         $queue = CheckResult::pass(
-            'latest probe answered after '.max(0, $answered['answered_at'] - $answered['dispatched_at']).' s',
+            'latest probe answered after '.max(0, $at - $answered['dispatched_at']).' s',
             $expected,
             $observed,
-            $now,
+            $at,
         );
 
         $release = ($answered['worker_commit'] ?? null) === Store::key($this->commit) && $this->commit !== null
-            ? CheckResult::pass('the worker runs this release', checkedAt: $now)
-            : CheckResult::fail(Codes::QUEUE_RELEASE_MISMATCH, 'the worker that answered the latest probe runs a different commit', checkedAt: $now);
+            ? CheckResult::pass('the worker runs this release', checkedAt: $at)
+            : CheckResult::fail(Codes::QUEUE_RELEASE_MISMATCH, 'the worker that answered the latest probe runs a different commit', checkedAt: $at);
 
         return [$queue, $release];
     }
 
-    private function bootedAt(int $now): int
+    /** When this release was first seen running; null when no marker could be stored. */
+    private function bootedAt(int $now): ?int
     {
         $boot = $this->store->createIfAbsent(Store::boot($this->commit), ['at' => $now]);
+        if ($boot === null) {
+            return null;
+        }
 
         return is_int($boot['at'] ?? null) ? $boot['at'] : $now;
     }
