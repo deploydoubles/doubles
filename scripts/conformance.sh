@@ -13,6 +13,9 @@
 # wrong release. The stack is always torn down (docker compose down -v).
 #
 # Requires: docker compose, node >= 24, and a built verifier (cd verifier && npm ci && npm run build).
+#
+# DD_PORT, DD_PROJECT and DD_IMAGE_TAG override the published port, the Compose project name and the
+# image tag, so two runs can share one machine without tearing each other down.
 
 set -euo pipefail
 
@@ -49,7 +52,8 @@ cli="$root/verifier/dist/cli.js"
 export REVISION="${REVISION:-$(git -C "$root" rev-parse HEAD)}"
 port="${DD_PORT:-8080}"
 export DD_PORT="$port"
-project="dd-conformance-${double}"
+project="${DD_PROJECT:-dd-conformance-${double}}"
+export DD_IMAGE_TAG="${DD_IMAGE_TAG:-local}"
 
 compose=(docker compose --project-name "$project" --file "$compose_file")
 

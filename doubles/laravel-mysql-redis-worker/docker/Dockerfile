@@ -49,4 +49,6 @@ RUN if [ -n "$REVISION" ]; then printf '%s\n' "$REVISION" > REVISION; fi
 
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8080
+# Caches the configuration from the mounted .env, then runs the command.
+ENTRYPOINT ["sh", "/app/docker/entrypoint.sh"]
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8080", "--no-reload"]

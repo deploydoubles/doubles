@@ -12,24 +12,13 @@ x-app: &app
       APP_DIR: doubles/laravel-mysql-redis-worker
       MONOREPO: "1"
       REVISION: ${REVISION:-}
-  image: deploydoubles-conformance/laravel-mysql-redis-worker:local
-  environment:
-    APP_ENV: production
-    APP_DEBUG: "false"
-    # A throwaway key for a throwaway app; platforms generate their own.
-    APP_KEY: base64:ZGVwbG95ZG91Ymxlcy1jb25mb3JtYW5jZS1vbmx5ISE=
-    LOG_CHANNEL: stderr
-    # URL style for the database...
-    DATABASE_URL: mysql://double:double@mysql:3306/double
-    # ...and discrete variables for Redis: the double accepts both.
-    REDIS_HOST: redis
-    REDIS_PORT: "6379"
-    REDIS_CLIENT: phpredis
-    CACHE_STORE: redis
-    QUEUE_CONNECTION: redis
-    SESSION_DRIVER: file
+  image: deploydoubles-conformance/laravel-mysql-redis-worker:${DD_IMAGE_TAG:-local}
+  # Settings arrive the way most PHP hosts deliver them: a .env file, not the
+  # process environment, with the configuration cached at startup
+  # (docker/entrypoint.sh). The env check must find APP_KEY anyway.
   volumes:
     - storage:/app/storage
+    - ./docker/conformance.env:/app/.env:ro
 
 services:
   migrate:

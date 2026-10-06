@@ -37,6 +37,8 @@ scripts/conformance.sh laravel-mysql-redis-worker
 
 `docker-compose.yml` builds from the monorepo root; `docker/Dockerfile` also builds on its own from this directory (`docker build -f docker/Dockerfile .`).
 
+Compose hands the app its settings the way most PHP hosts do: `docker/conformance.env` is mounted as the app's `.env`, and `docker/entrypoint.sh` runs `php artisan config:cache` before every process starts. With the configuration cached Laravel never reads `.env` again, so the run also proves the report copes with that.
+
 ## Maintainer
 
 Jan Peter Wiersma.
