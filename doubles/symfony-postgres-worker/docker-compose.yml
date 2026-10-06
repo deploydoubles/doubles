@@ -1,0 +1,90 @@
+# Reference setup for the conformance run (scripts/conformance.sh).
+# Builds from the monorepo root so the checks library under test is the one
+# in this working tree (MONOREPO=1).
+
+name: dd-symfony-postgres-worker
+
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: doubles/symfony-postgres-worker/docker/Dockerfile
+    args:
+      APP_DIR: doubles/symfony-postgres-worker
+      MONOREPO: "1"
+      REVISION: ${REVISION:-}
+  image: deploydoubles-conformance/symfony-postgres-worker:local
+  environment:
+    APP_ENV: prod
+    APP_DEBUG: "0"
+    # A throwaway secret for a throwaway app; platforms generate their own.
+    APP_SECRET: deploydoubles-conformance-only-0123456789abcdef
+    # URL style for the database (the migrate service below uses discrete variables).
+    DATABASE_URL: postgresql://double:double@postgres:5432/double
+    MESSENGER_TRANSPORT_DSN: doctrine://default?auto_setup=0
+  volumes:
+    - report:/app/var/deploy-report
+    - storage:/app/var/storage
+
+services:
+  migrate:
+    <<: *app
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: "0"
+      APP_SECRET: deploydoubles-conformance-only-0123456789abcdef
+      # Discrete variables: the double accepts both connection styles.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_DATABASE: double
+      DB_USERNAME: double
+      DB_PASSWORD: double
+    command: ["php", "bin/console", "doctrine:migrations:migrate", "--no-interaction", "--allow-no-migration"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    <<: *app
+    ports:
+      - "${DD_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8080/up') === false ? 1 : 0);"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  worker:
+    <<: *app
+    command: ["php", "bin/console", "messenger:consume", "async", "--no-interaction"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  # What a platform's cron does: `* * * * * php bin/console deploy-report:run`.
+  # The first run happens at start, then on every minute boundary.
+  cron:
+    <<: *app
+    command: ["sh", "-c", "while :; do php bin/console deploy-report:run --no-interaction; sleep $$((60 - $$(date +%s) % 60)); done"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: double
+      POSTGRES_USER: double
+      POSTGRES_PASSWORD: double
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "double", "-d", "double"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  report:
+  storage:

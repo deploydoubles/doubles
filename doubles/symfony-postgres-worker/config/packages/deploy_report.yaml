@@ -1,0 +1,19 @@
+# Deploy report configuration (deploydoubles/checks-php, Symfony bundle).
+#
+# This is a reference app ("double"), so it serves the full tier to every
+# request: that is how a verifier reads its commit without a token, and it is
+# the public proof that the report never leaks. `tier` is a committed literal
+# on purpose — the bundle rejects an %env()% value. Real apps keep 'public'.
+deploy_report:
+    tier: full
+    name: symfony-postgres-worker
+    double: symfony-postgres-worker
+    probe_transport: async
+    checks:
+        database: { expected: postgres }
+        queue: { expected: database }
+        queue.release: {}
+        scheduler: {}
+        scheduler.release: {}
+        storage: {}
+        env: { required: [APP_SECRET] }

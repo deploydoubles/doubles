@@ -1,0 +1,10 @@
+# see https://symfony.com/doc/current/reference/configuration/framework.html
+framework:
+    secret: '%env(APP_SECRET)%'
+
+    # No sessions: nothing in this app needs one.
+    session: false
+
+when@test:
+    framework:
+        test: true

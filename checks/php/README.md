@@ -2,7 +2,7 @@
 
 Generates the [deploy report](https://github.com/deploydoubles/doubles/blob/main/spec/report.md) — `GET /.well-known/deploy-report` — for PHP applications, so a pipeline, an agent or a monitor can tell whether a deploy actually works.
 
-Laravel is supported today. Symfony and plain PHP follow.
+Laravel and Symfony are supported today. Plain PHP follows.
 
 > This package is developed in the [`deploydoubles/doubles`](https://github.com/deploydoubles/doubles) monorepo. Its own repository is a read-only mirror; open issues and pull requests in the monorepo.
 
@@ -19,7 +19,42 @@ The service provider is auto-discovered. It:
 
 Make sure the app's scheduler runs (`php artisan schedule:work`, or `schedule:run` from cron every minute) and that `storage/` is shared by the web process, the queue workers and the scheduler.
 
-## Configure
+## Install (Symfony)
+
+```sh
+composer require deploydoubles/checks-php
+```
+
+Register the bundle in `config/bundles.php` (there is no Flex recipe yet):
+
+```php
+DeployDoubles\Checks\Symfony\DeployReportBundle::class => ['all' => true],
+```
+
+The bundle:
+
+- answers `GET /.well-known/deploy-report` from a request listener that runs before routing and the firewall — no route import, no access rule, no session;
+- adds `php bin/console deploy-report:run`, which runs the checks and stores their results in `var/deploy-report/`. Run it every minute — from cron (`* * * * * php bin/console deploy-report:run`) or from your own scheduler;
+- sends the queue probe as a Messenger message on the `async` transport (`probe_transport`), so a running `messenger:consume async` worker answers it. Route `DeployDoubles\Checks\Symfony\ProbeMessage` to that transport too, so tools that read your routing see the worker.
+
+Configure it in `config/packages/deploy_report.yaml`:
+
+```yaml
+deploy_report:
+    tier: public            # a literal; an %env()% value is rejected at compile time
+    checks:
+        database: { expected: postgres }
+        queue: { expected: database }   # doctrine transport; redis, amqp, ...
+        queue.release: {}
+        scheduler: {}
+        scheduler.release: {}
+        storage: {}
+        env: { required: [APP_SECRET] }
+```
+
+`token` and `run_id` default to `DEPLOY_REPORT_TOKEN` and `DEPLOY_RUN_ID`. Without `checks`, they are inferred from the container (a Doctrine connection, the probe transport). `store_path` and `storage_marker_path` default to `var/deploy-report` and `var/storage/deploy-report`; share both between the web process, the worker and the cron job. The `database` check uses the Doctrine DBAL connection (`connection`, default `default`) and, when DoctrineMigrationsBundle is installed, reports pending migrations.
+
+## Configure (Laravel)
 
 ```sh
 php artisan vendor:publish --tag=deploy-report-config

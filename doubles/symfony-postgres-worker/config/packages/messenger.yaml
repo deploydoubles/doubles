@@ -1,0 +1,14 @@
+parameters:
+    # Doctrine transport on the app's own Postgres database. The table is
+    # created by this app's migration, not at runtime (auto_setup=0).
+    env(MESSENGER_TRANSPORT_DSN): 'doctrine://default?auto_setup=0'
+
+framework:
+    messenger:
+        transports:
+            async: '%env(MESSENGER_TRANSPORT_DSN)%'
+
+        routing:
+            # The deploy report's queue probe goes through the async transport,
+            # so only a running `messenger:consume async` worker can answer it.
+            DeployDoubles\Checks\Symfony\ProbeMessage: async
