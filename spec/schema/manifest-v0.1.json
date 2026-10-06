@@ -43,6 +43,13 @@
     },
     "build": { "$ref": "#/$defs/commands" },
     "release": { "$ref": "#/$defs/commands" },
+    "persistent_paths": {
+      "description": "Directories, relative to the app root, that must survive every deploy and be shared by all of the app's processes and releases. The deploy report's result store lives in one of them.",
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 16,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*$", "maxLength": 200 }
+    },
     "expects": {
       "type": "object",
       "required": ["inside", "outside"],

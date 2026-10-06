@@ -12,6 +12,7 @@
   "env": { "required": ["NODE_ENV"] },
   "build": ["npm ci", "npm run build"],
   "release": [],
+  "persistent_paths": ["storage"],
   "expects": {
     "inside": ["database", "scheduler", "scheduler.release", "storage", "env"],
     "outside": ["reachability", "tls", "https_redirect", "release", "run_id", "downtime", "rollback", "persistence", "detection"]

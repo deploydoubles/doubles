@@ -4,7 +4,7 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 
 ## The loop
 
-1. **Read `double.json`.** It lists what to provision: a Postgres database and one process (`npm start`, which serves on `$PORT`). There is no worker and no cron job: the checks run inside the web process. The build is `npm ci` then `npm run build`; there is no release step.
+1. **Read `double.json`.** It lists what to provision: a Postgres database and one process (`npm start`, which serves on `$PORT`). There is no worker and no cron job: the checks run inside the web process. The build is `npm ci` then `npm run build`; there is no release step. `persistent_paths` names the directories that must survive every deploy.
 2. **Provision and deploy** it on the platform you are testing, from this repository's URL. Do not hand the platform `double.json`: the platform must detect what the app needs on its own.
 3. **Optionally set `DEPLOY_RUN_ID`** to a fresh value in the app's environment for this deploy.
 4. **Verify** once the deploy reports success:
@@ -26,6 +26,7 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 
 ## Facts an agent needs
 
+- `storage/` (`persistent_paths` in `double.json`) holds the report's result store and the storage marker, and must be shared between releases. Set it up as the platform's persistent or shared storage — for example a persistent path in Strackt's Runtime settings, or `shared_dirs` in Deployer. Without that, each deploy starts with an empty store: the persistence check finds earlier releases' markers gone, and a rollback looks like a fresh release.
 - The report is at `/.well-known/deploy-report`; `/up` returns 200 when the process is alive.
 - Checks run in the server process, started from `instrumentation.ts`: once at boot, then every 60 seconds. Results are stored in `storage/deploy-report/`.
 - The database is read from `DATABASE_URL`, or from the libpq variables `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` when `DATABASE_URL` is unset.

@@ -14,6 +14,7 @@
   "env": { "required": ["APP_SECRET"], "generated": ["APP_SECRET"] },
   "build": ["composer install --no-dev --optimize-autoloader"],
   "release": ["php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration"],
+  "persistent_paths": ["var/deploy-report", "var/storage"],
   "expects": {
     "inside": ["database", "queue", "queue.release", "scheduler", "scheduler.release", "storage", "env"],
     "outside": ["reachability", "tls", "https_redirect", "release", "run_id", "downtime", "rollback", "persistence", "detection"]

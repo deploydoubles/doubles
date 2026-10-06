@@ -16,7 +16,7 @@ Everything is declared in [`double.json`](double.json):
 | Environment | `APP_ENV`; the database as a URL (`DATABASE_URL`) or discrete variables (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) — as real variables or in a `.env` file in the app root |
 | Build | `composer install --no-dev --optimize-autoloader` |
 
-`storage/` must be persistent and shared by the web process and the cron job.
+`storage/` must be persistent, shared by the web process and the cron job, and kept across releases: `double.json` lists it in `persistent_paths`. Set it up as the platform's persistent or shared storage — for example a persistent path in Strackt's Runtime settings, or `shared_dirs` in Deployer.
 
 ## Verify a deploy
 

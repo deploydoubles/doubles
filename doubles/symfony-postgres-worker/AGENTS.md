@@ -4,7 +4,7 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 
 ## The loop
 
-1. **Read `double.json`.** It lists what to provision: a Postgres database, three processes (web, a Messenger worker `php bin/console messenger:consume async`, and `php bin/console deploy-report:run` every minute from cron), the environment variables (`APP_SECRET` must be generated), the build step and the release step (`php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration`).
+1. **Read `double.json`.** It lists what to provision: a Postgres database, three processes (web, a Messenger worker `php bin/console messenger:consume async`, and `php bin/console deploy-report:run` every minute from cron), the environment variables (`APP_SECRET` must be generated), the build step and the release step (`php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration`). `persistent_paths` names the directories that must survive every deploy.
 2. **Provision and deploy** it on the platform you are testing, from this repository's URL. Do not hand the platform `double.json`: the platform must detect what the app needs on its own.
 3. **Optionally set `DEPLOY_RUN_ID`** to a fresh value in the app's environment for this deploy.
 4. **Verify** once the deploy reports success:
@@ -26,6 +26,7 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 
 ## Facts an agent needs
 
+- `var/deploy-report/` and `var/storage/` (`persistent_paths` in `double.json`) hold the report's result store and the storage marker, and must be shared between releases. Set them up as the platform's persistent or shared storage — for example persistent paths in Strackt's Runtime settings, or `shared_dirs` in Deployer. Without that, each deploy starts with an empty store: the persistence check finds earlier releases' markers gone, and a rollback looks like a fresh release.
 - The report is at `/.well-known/deploy-report`; `/up` returns 200 when the process is alive.
 - Checks run once a minute from cron and are stored in `var/deploy-report/`. `var/deploy-report/` and `var/storage/` must be shared by the web process, the worker and the cron job. Allow at least two minutes after the deploy before expecting a settled report.
 - The Messenger transport is Doctrine on the same Postgres database (`MESSENGER_TRANSPORT_DSN`, default `doctrine://default?auto_setup=0`); its table is created by the migration.

@@ -16,7 +16,7 @@ Everything is declared in [`double.json`](double.json):
 | Environment | `APP_SECRET` (generate it); the database as a URL (`DATABASE_URL`) or discrete variables (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) |
 | Release step | `php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration` |
 
-`var/deploy-report/` and `var/storage/` must be persistent and shared by the web process, the worker and the cron job.
+`var/deploy-report/` and `var/storage/` must be persistent, shared by the web process, the worker and the cron job, and kept across releases: `double.json` lists them in `persistent_paths`. Set them up as the platform's persistent or shared storage — for example persistent paths in Strackt's Runtime settings, or `shared_dirs` in Deployer.
 
 ## Verify a deploy
 

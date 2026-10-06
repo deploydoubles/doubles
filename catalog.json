@@ -43,6 +43,9 @@
       "release": [
         "php artisan migrate --force"
       ],
+      "persistent_paths": [
+        "storage"
+      ],
       "expects": {
         "inside": [
           "database",
@@ -100,6 +103,9 @@
         "npm run build"
       ],
       "release": [],
+      "persistent_paths": [
+        "storage"
+      ],
       "expects": {
         "inside": [
           "database",
@@ -156,6 +162,9 @@
         "composer install --no-dev --optimize-autoloader"
       ],
       "release": [],
+      "persistent_paths": [
+        "storage"
+      ],
       "expects": {
         "inside": [
           "database",
@@ -220,6 +229,10 @@
       ],
       "release": [
         "php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration"
+      ],
+      "persistent_paths": [
+        "var/deploy-report",
+        "var/storage"
       ],
       "expects": {
         "inside": [

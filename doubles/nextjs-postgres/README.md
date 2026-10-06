@@ -16,6 +16,8 @@ Everything is declared in [`double.json`](double.json):
 | Environment | the database as a URL (`DATABASE_URL`) or the libpq variables (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`) |
 | Build | `npm ci`, `npm run build` |
 
+`storage/` must be persistent and kept across releases: `double.json` lists it in `persistent_paths`. Set it up as the platform's persistent or shared storage — for example a persistent path in Strackt's Runtime settings, or `shared_dirs` in Deployer. The app needs a long-running server process and a writable `storage/`: serverless and read-only file systems are not supported, and report `scheduler: fail` with `report_store_unwritable`.
+
 ## Verify a deploy
 
 ```sh
