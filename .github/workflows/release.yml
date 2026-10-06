@@ -5,8 +5,10 @@
 #                             a trusted publisher can only be configured on a package that exists.
 #   checks-php-v<version>  -> tag v<version> on deploydoubles/checks-php; Packagist picks it up
 #                             through its GitHub hook (needs SPLIT_TOKEN)
+#   checks-node-v<version> -> npm package "@deploydoubles/checks", published the same way as the
+#                             verifier (trusted publishing; NPM_TOKEN for the first publish only)
 #
-# Both jobs run in the "release" environment, so its protection rules (who may approve, which
+# Every publishing job runs in the "release" environment, so its protection rules (who may approve, which
 # tags may deploy) gate every publish. Each secret is handed only to the one step that uses it.
 # A missing credential fails that step and publishes nothing.
 
@@ -17,6 +19,7 @@ on:
     tags:
       - 'verifier-v*'
       - 'checks-php-v*'
+      - 'checks-node-v*'
 
 permissions:
   contents: read
@@ -98,3 +101,46 @@ jobs:
           sha=$(git subtree split --prefix=checks/php HEAD)
           git push "https://x-access-token:${GH_TOKEN}@github.com/deploydoubles/checks-php.git" "$sha:refs/tags/v$version"
           echo "deploydoubles/checks-php v$version -> $sha"
+
+  checks-node:
+    if: startsWith(github.ref_name, 'checks-node-v')
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing and provenance
+    defaults:
+      run:
+        working-directory: checks/node
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#checks-node-v}"
+          declared=$(node -p "require('./package.json').version")
+          [ "$version" = "$declared" ] || { echo "::error::tag $TAG does not match checks/node/package.json version $declared"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test -- --run
+      - name: Publish to npm
+        env:
+          # First publish only. Once the trusted publisher is configured on npmjs.com
+          # (repository deploydoubles/doubles, workflow release.yml, environment release),
+          # delete the NPM_TOKEN secret: npm then authenticates with this job's OIDC token.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Trusted publishing needs npm 11.5.1 or newer.
+          if [ "$(printf '%s\n' 11.5.1 "$(npm --version)" | sort -V | head -n1)" != 11.5.1 ]; then
+            npm install --global npm@11
+          fi
+          npm publish --provenance --access public

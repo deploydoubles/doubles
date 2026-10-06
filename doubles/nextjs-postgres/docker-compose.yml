@@ -1,0 +1,47 @@
+# Reference setup for the conformance run (scripts/conformance.sh).
+# Builds from the monorepo root so the checks library under test is the one
+# in this working tree (MONOREPO=1).
+
+name: dd-nextjs-postgres
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: doubles/nextjs-postgres/docker/Dockerfile
+      args:
+        APP_DIR: doubles/nextjs-postgres
+        MONOREPO: "1"
+        REVISION: ${REVISION:-}
+    image: deploydoubles-conformance/nextjs-postgres:local
+    environment:
+      # URL style (node-postgres also reads PGHOST, PGPORT, PGDATABASE, PGUSER
+      # and PGPASSWORD when DATABASE_URL is unset: the double accepts both).
+      DATABASE_URL: postgresql://double:double@postgres:5432/double
+    ports:
+      - "${DD_PORT:-8080}:8080"
+    volumes:
+      - storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/up').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: double
+      POSTGRES_USER: double
+      POSTGRES_PASSWORD: double
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "double", "-d", "double"]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+volumes:
+  storage:

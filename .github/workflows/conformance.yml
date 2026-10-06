@@ -46,6 +46,20 @@ jobs:
       - run: vendor/bin/pest
         working-directory: checks/php
 
+  checks-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: checks/node
+      - run: npm run build
+        working-directory: checks/node
+      - run: npm test -- --run
+        working-directory: checks/node
+
   verifier:
     runs-on: ubuntu-latest
     steps:
@@ -106,26 +120,31 @@ jobs:
         env:
           DOUBLE: ${{ matrix.double }}
         run: scripts/conformance.sh "$DOUBLE"
-      - name: Revert control — without its result producer the double must fail
+      - name: Revert control — without its result producer or database the double must fail
         env:
           DOUBLE: ${{ matrix.double }}
         run: |
-          # The worker when one is declared; otherwise a cron service, if the Compose file has one.
+          # The worker when one is declared; otherwise a cron service, if the Compose file has one;
+          # otherwise the database, stopped after startup (a Compose service named after it).
+          manifest="doubles/$DOUBLE/double.json"
           services=$(docker compose -f "doubles/$DOUBLE/docker-compose.yml" config --services)
-          if jq -e '.processes.worker' "doubles/$DOUBLE/double.json" >/dev/null; then
-            control=worker
+          database=$(jq -r '.services.database // empty' "$manifest")
+          if jq -e '.processes.worker' "$manifest" >/dev/null; then
+            control=(--without worker)
           elif printf '%s\n' "$services" | grep -qx cron; then
-            control=cron
+            control=(--without cron)
+          elif [ -n "$database" ] && printf '%s\n' "$services" | grep -qx "$database"; then
+            control=(--stop "$database")
           else
-            control=""
+            control=()
           fi
-          if [ -n "$control" ]; then
-            if scripts/conformance.sh "$DOUBLE" --without "$control"; then
-              echo "::error::$DOUBLE passed without its $control: the check that should catch that cannot fail"
+          if [ "${#control[@]}" -gt 0 ]; then
+            if scripts/conformance.sh "$DOUBLE" "${control[@]}"; then
+              echo "::error::$DOUBLE passed with ${control[*]}: the check that should catch that cannot fail"
               exit 1
             fi
           else
-            echo "no worker or cron service; skipped"
+            echo "no worker, cron or database service; skipped"
           fi
       - name: Revert control — without its scheduler the double must fail
         env:

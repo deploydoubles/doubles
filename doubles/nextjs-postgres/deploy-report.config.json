@@ -1,0 +1,14 @@
+{
+  "tier": "full",
+  "name": "nextjs-postgres",
+  "double": "nextjs-postgres",
+  "checks": {
+    "database": { "expected": "postgres" },
+    "scheduler": {},
+    "scheduler.release": {},
+    "storage": {},
+    "env": { "required": ["NODE_ENV"] }
+  },
+  "store_path": "storage/deploy-report",
+  "storage_marker_path": "storage/app/deploy-report"
+}
