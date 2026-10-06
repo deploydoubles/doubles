@@ -79,8 +79,10 @@ it('ignores DEPLOY_REPORT_TIER-style environment variables set before the app bo
 it('keeps tier a literal in the shipped config files, never an env() call', function () {
     $files = array_filter([
         __DIR__.'/../../config/deploy-report.php',
-        // The reference doubles, when this runs in the monorepo.
+        // The reference doubles, when this runs in the monorepo: Laravel's
+        // published config, and the framework-less deploy-report.php.
         ...(glob(__DIR__.'/../../../../doubles/*/config/deploy-report.php') ?: []),
+        ...(glob(__DIR__.'/../../../../doubles/*/deploy-report.php') ?: []),
     ], 'is_file');
 
     expect($files)->not->toBeEmpty();

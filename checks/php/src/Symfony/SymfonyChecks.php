@@ -9,6 +9,7 @@ use DeployDoubles\Checks\CheckResult;
 use DeployDoubles\Checks\Checks\Engines;
 use DeployDoubles\Checks\Checks\EnvCheck;
 use DeployDoubles\Checks\Checks\StorageCheck;
+use DeployDoubles\Checks\Checks\WriteProbe;
 use DeployDoubles\Checks\Codes;
 use DeployDoubles\Checks\Config;
 use Doctrine\DBAL\Connection;
@@ -72,18 +73,17 @@ final class SymfonyChecks
             );
         }
 
-        $value = bin2hex(random_bytes(8));
-        try {
-            $connection->executeStatement('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
-            $connection->executeStatement('INSERT INTO deploy_report_probe (v) VALUES (?)', [$value]);
-            $read = $connection->fetchOne('SELECT v FROM deploy_report_probe');
-            $connection->executeStatement('DROP TABLE deploy_report_probe');
-        } catch (\Throwable) {
-            return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'write then read failed', $expected, $observed);
-        }
-
-        if ($read !== $value) {
-            return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'the value read back differs', $expected, $observed);
+        $written = WriteProbe::run(
+            $native instanceof PDO ? (string) $native->getAttribute(PDO::ATTR_DRIVER_NAME) : Engines::engine($observed),
+            static fn (string $sql) => $connection->executeStatement($sql),
+            static fn (string $sql, string $value) => $connection->executeStatement($sql, [$value]),
+            static fn (string $sql) => $connection->fetchOne($sql),
+            $expected,
+            $observed,
+            $pending === null ? 'connected' : 'connected; 0 migrations pending',
+        );
+        if ($written !== null) {
+            return $written;
         }
 
         return CheckResult::pass(

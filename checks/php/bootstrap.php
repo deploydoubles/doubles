@@ -59,7 +59,7 @@ if (! function_exists(__NAMESPACE__.'\serve')) {
             $standalone->config,
             $commit,
             (new StandaloneChecks($standalone, $commit))->all(),
-            warn: static fn (string $message) => error_log('deploy-report: '.$message),
+            warn: static fn (string $message) => error_log(str_starts_with($message, 'deploy-report:') ? $message : 'deploy-report: '.$message),
         );
 
         foreach ($runner->run() as $name => $result) {

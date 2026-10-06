@@ -7,10 +7,48 @@ use function DeployDoubles\Checks\serve;
 const PLAIN_COMMIT = 'dddddddddddddddddddddddddddddddddddddddd';
 const PLAIN_TOKEN = 'plain-php-token-that-is-long-enough-0123456';
 
+/** An SQLite connection that records every statement, and can refuse temporary tables the way Vitess does. */
+final class RecordingPdo extends PDO
+{
+    /** @var list<string> */
+    public static array $statements = [];
+
+    public static bool $noTemporaryTables = false;
+
+    public function exec(string $statement): int|false
+    {
+        self::$statements[] = $statement;
+        if (self::$noTemporaryTables && str_starts_with($statement, 'CREATE TEMPORARY')) {
+            $e = new PDOException('SQLSTATE[0A000]: Feature not supported: leaky_user@secret-host.internal');
+            $e->errorInfo = ['0A000', 0, 'unsupported for leaky_user@secret-host.internal'];
+
+            throw $e;
+        }
+
+        return parent::exec($statement);
+    }
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        self::$statements[] = $query;
+
+        return parent::prepare($query, $options);
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        self::$statements[] = $query;
+
+        return $fetchMode === null ? parent::query($query) : parent::query($query, $fetchMode, ...$fetchModeArgs);
+    }
+}
+
 beforeEach(function () {
     $this->root = tempDir();
     $_SERVER['DEPLOY_COMMIT'] = PLAIN_COMMIT;
     $GLOBALS['dd_database_calls'] = 0;
+    RecordingPdo::$statements = [];
+    RecordingPdo::$noTemporaryTables = false;
 
     $this->config = function (string $body): void {
         file_put_contents($this->root.'/deploy-report.php', "<?php\n\n".$body);
@@ -114,6 +152,68 @@ it('reports a forced database error as a fixed code with no username, host or DS
         expect($response['body'])->not->toContain($secret);
     }
 })->skip(! extension_loaded('pdo_mysql'), 'needs pdo_mysql');
+
+it('skips the write test with database_write_unsupported when the server has no temporary tables', function () {
+    RecordingPdo::$noTemporaryTables = true;
+    ($this->config)(<<<'PHP'
+        return [
+            'tier' => 'full',
+            'checks' => ['database' => ['expected' => 'sqlite'], 'scheduler' => []],
+            'database' => fn (): PDO => new RecordingPdo('sqlite::memory:'),
+        ];
+        PHP);
+
+    run($this->root);
+    $response = ($this->serve)();
+
+    expect($response['status'])->toBe(200)
+        ->and($response['json']['status'])->toBe('pass')
+        ->and($response['json']['deploy']['checks']['database']['status'])->toBe('skip')
+        ->and($response['json']['deploy']['checks']['database']['code'])->toBe('database_write_unsupported')
+        ->and($response['body'])->not->toContain('leaky_user')
+        ->and($response['body'])->not->toContain('secret-host');
+});
+
+it('drops only the temporary probe table after the write test', function () {
+    ($this->config)(<<<'PHP'
+        return [
+            'tier' => 'full',
+            'checks' => ['database' => ['expected' => 'sqlite'], 'scheduler' => []],
+            'database' => fn (): PDO => new RecordingPdo('sqlite::memory:'),
+        ];
+        PHP);
+
+    run($this->root);
+
+    expect(RecordingPdo::$statements)->toContain('DROP TABLE temp.deploy_report_probe')
+        ->and(RecordingPdo::$statements)->not->toContain('DROP TABLE deploy_report_probe')
+        ->and(($this->serve)()['json']['deploy']['checks']['database']['status'])->toBe('pass');
+});
+
+it('goes through the core runner: a returning release starts a fresh run, and stale results are dated to the last run', function () {
+    ($this->config)("return ['tier' => 'full', 'checks' => ['scheduler' => [], 'storage' => []]];");
+    $commit = PLAIN_COMMIT;
+    $store = $this->root.'/storage/deploy-report';
+    mkdir($store, 0777, true);
+    $lastRun = time() - 600;
+    // An earlier life of this commit: stale results, an old heartbeat and boot marker.
+    file_put_contents("$store/results-$commit.json", json_encode(['commit' => $commit, 'since' => $lastRun - 60, 'ran_at' => $lastRun, 'checks' => []]));
+    file_put_contents("$store/heartbeat-$commit.json", json_encode(['commit' => $commit, 'at' => $lastRun, 'first_minute' => intdiv($lastRun, 60) - 1, 'minutes' => [intdiv($lastRun, 60)]]));
+    file_put_contents("$store/boot-$commit.json", json_encode(['at' => $lastRun - 60]));
+
+    $stale = ($this->serve)()['json']['deploy']['checks']['scheduler'];
+    expect($stale['code'])->toBe('scheduler_results_stale')
+        ->and($stale['checked_at'])->toBe(gmdate('Y-m-d\TH:i:s\Z', $lastRun));
+
+    $before = time();
+    run($this->root);
+    $results = json_decode((string) file_get_contents("$store/results-$commit.json"), true);
+    $boot = json_decode((string) file_get_contents("$store/boot-$commit.json"), true);
+
+    expect($results['since'])->toBeGreaterThanOrEqual($before)
+        ->and($boot['at'])->toBeGreaterThanOrEqual($before)
+        ->and(($this->serve)()['json']['status'])->toBe('pass');
+});
 
 it('fails the scheduler when the runner never ran', function () {
     ($this->config)("return ['tier' => 'full', 'checks' => ['scheduler' => [], 'storage' => []]];");

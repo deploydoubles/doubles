@@ -8,6 +8,7 @@ use Closure;
 use DeployDoubles\Checks\Checks\Engines;
 use DeployDoubles\Checks\Checks\EnvCheck;
 use DeployDoubles\Checks\Checks\StorageCheck;
+use DeployDoubles\Checks\Checks\WriteProbe;
 use DeployDoubles\Checks\CheckResult;
 use DeployDoubles\Checks\Codes;
 use PDO;
@@ -51,18 +52,16 @@ final class StandaloneChecks
             return CheckResult::fail(Codes::DATABASE_ENGINE_MISMATCH, 'connected to a different engine than declared', $expected, $observed);
         }
 
-        $value = bin2hex(random_bytes(8));
-        try {
-            $pdo->exec('CREATE TEMPORARY TABLE deploy_report_probe (v VARCHAR(32))');
-            $pdo->prepare('INSERT INTO deploy_report_probe (v) VALUES (?)')->execute([$value]);
-            $read = $pdo->query('SELECT v FROM deploy_report_probe')->fetchColumn();
-            $pdo->exec('DROP TABLE deploy_report_probe');
-        } catch (\Throwable) {
-            return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'write then read failed', $expected, $observed);
-        }
-
-        if ($read !== $value) {
-            return CheckResult::fail(Codes::DATABASE_WRITE_FAILED, 'the value read back differs', $expected, $observed);
+        $written = WriteProbe::run(
+            (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME),
+            static fn (string $sql) => $pdo->exec($sql),
+            static fn (string $sql, string $value) => $pdo->prepare($sql)->execute([$value]),
+            static fn (string $sql) => $pdo->query($sql)->fetchColumn(),
+            $expected,
+            $observed,
+        );
+        if ($written !== null) {
+            return $written;
         }
 
         return CheckResult::pass('connected; write then read ok', $expected, $observed);
