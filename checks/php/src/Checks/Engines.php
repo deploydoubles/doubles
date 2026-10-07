@@ -12,6 +12,17 @@ use PDO;
  */
 final class Engines
 {
+    /**
+     * Engines that satisfy one another's expectation: valkey speaks the redis
+     * protocol, and mariadb is what the `mysql` driver connects to. A framework
+     * cannot tell the two of either pair apart from its configuration, so an
+     * inferred `mysql` must accept a MariaDB server.
+     */
+    private const INTERCHANGEABLE = [
+        ['redis', 'valkey'],
+        ['mysql', 'mariadb'],
+    ];
+
     public static function fromPdo(PDO $pdo): string
     {
         $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
@@ -28,7 +39,7 @@ final class Engines
     }
 
     /**
-     * @param array<string, mixed> $info the parsed `INFO server` section
+     * @param  array<string, mixed>  $info  the parsed `INFO server` section
      */
     public static function fromRedisInfo(array $info): string
     {
@@ -39,7 +50,7 @@ final class Engines
         return self::format('redis', self::majorMinor((string) ($info['redis_version'] ?? '')));
     }
 
-    /** Engines that satisfy an expectation: valkey speaks the redis protocol. */
+    /** Whether the observed engine meets the expectation: the same engine, or its pair in INTERCHANGEABLE. */
     public static function satisfies(?string $expected, string $observedEngine): bool
     {
         if ($expected === null) {
@@ -49,7 +60,13 @@ final class Engines
             return true;
         }
 
-        return in_array($expected, ['redis', 'valkey'], true) && in_array($observedEngine, ['redis', 'valkey'], true);
+        foreach (self::INTERCHANGEABLE as $pair) {
+            if (in_array($expected, $pair, true) && in_array($observedEngine, $pair, true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static function engine(string $observed): string
