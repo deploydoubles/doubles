@@ -12,7 +12,7 @@ Everything is declared in [`double.json`](double.json):
 |---|---|
 | Runtime | PHP 8.4+ with `pdo_pgsql` |
 | Services | Postgres (database, and the Messenger transport table) |
-| Processes | web (document root `public/`), `php bin/console messenger:consume async`, and `php bin/console deploy-report:run` from cron every minute |
+| Processes | web (document root `public/`), `php bin/console messenger:consume async`, and cron: `php bin/console deploy-report:run` every minute from the app root ([`crontab`](crontab)) |
 | Environment | `APP_SECRET` (generate it); the database as a URL (`DATABASE_URL`) or discrete variables (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`) |
 | Release step | `php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration` |
 
