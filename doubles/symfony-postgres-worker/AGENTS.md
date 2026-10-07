@@ -4,7 +4,7 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 
 ## The loop
 
-1. **Read `double.json`.** It lists what to provision: a Postgres database, three processes (web, a Messenger worker `php bin/console messenger:consume async`, and `php bin/console deploy-report:run` every minute from cron), the environment variables (`APP_SECRET` must be generated), the build step and the release step (`php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration`). `persistent_paths` names the directories that must survive every deploy.
+1. **Read `double.json`.** It lists what to provision: a Postgres database, three processes (web, a Messenger worker `php bin/console messenger:consume async`, and `php bin/console deploy-report:run` every minute from cron, from the app root — see `crontab`), the environment variables (`APP_SECRET` must be generated), the build step and the release step (`php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration`). `persistent_paths` names the directories that must survive every deploy.
 2. **Provision and deploy** it on the platform you are testing, from this repository's URL. Do not hand the platform `double.json`: the platform must detect what the app needs on its own.
 3. **Optionally set `DEPLOY_RUN_ID`** to a fresh value in the app's environment for this deploy.
 4. **Verify** once the deploy reports success:

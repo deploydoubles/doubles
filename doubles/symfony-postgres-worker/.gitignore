@@ -5,6 +5,8 @@
 /config/reference.php
 /config/secrets/prod/prod.decrypt.private.php
 /public/bundles/
-/var/
+/var/*
+!/var/deploy-report/
+!/var/storage/
 /vendor/
 /REVISION
