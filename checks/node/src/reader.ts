@@ -92,19 +92,36 @@ function schedulerRelease(store: FileStore, commit: string | null, now: number):
   if (own === null) return at(pending(30, 'waiting for the first heartbeat'), now);
   const beat = Number.isInteger(own.at) ? (own.at as number) : now;
 
-  const first = Number.isInteger(own.first_minute) ? (own.first_minute as number) : null;
-  // The minute this release took over may legitimately contain the previous release's last run.
-  const mine = (Array.isArray(own.minutes) ? own.minutes : []).filter((m): m is number => Number.isInteger(m) && m !== first);
-
+  // A minute in which either release took over may legitimately contain the other's run: the
+  // minute a release first ran in, and the minute its process last started in (a rollback
+  // restarts the process in a minute the release it replaces ran in). Both sides count: the
+  // replaced release's last run is in the minute the new one took over.
+  const firstOf = (heartbeat: Record<string, unknown> | null): number[] => (Number.isInteger(heartbeat?.first_minute) ? [heartbeat!.first_minute as number] : []);
+  const startOf = (heartbeat: Record<string, unknown> | null): number[] => (Number.isInteger(heartbeat?.started_minute) ? [heartbeat!.started_minute as number] : []);
+  const thisMinute = Math.floor(now / 60);
   const ownName = Store.heartbeat(commit);
+  const ownMinutes = (Array.isArray(own.minutes) ? own.minutes : []).filter((m): m is number => Number.isInteger(m));
+  let undecided = false;
+
   for (const name of store.names('heartbeat-')) {
     if (name === ownName) continue;
     const other = store.read(name);
     const theirs = Array.isArray(other?.minutes) ? (other!.minutes as unknown[]) : [];
-    if (mine.some((minute) => theirs.includes(minute))) {
-      return at(fail('scheduler_release_mismatch', 'heartbeats from more than one commit in the same minute'), beat);
+    const firsts = [...firstOf(own), ...firstOf(other)];
+    const starts = [...startOf(own), ...startOf(other)];
+
+    for (const minute of ownMinutes) {
+      if (firsts.includes(minute) || !theirs.includes(minute)) continue;
+      if (!starts.includes(minute)) {
+        return at(fail('scheduler_release_mismatch', 'heartbeats from more than one commit in the same minute'), beat);
+      }
+      // A process started in a minute both releases ran in. If the other release is still running,
+      // its next run says so; until the minute is over there is nothing to tell a handover from an
+      // overlap, and a pass now could settle a deploy with two schedulers.
+      if (minute >= thisMinute) undecided = true;
     }
   }
+  if (undecided) return at(pending(30, 'waiting for the next scheduled run'), beat);
   return at(pass('heartbeats in each minute come from one commit'), beat);
 }
 
