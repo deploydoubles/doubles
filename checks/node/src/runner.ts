@@ -22,6 +22,17 @@ const OTHER_RELEASE_TTL = 3600;
  */
 const RETURN_GAP = 90;
 
+/**
+ * The same judgement for the first run of a process that has just started. A
+ * running scheduler leaves a run every minute, so a process that starts while
+ * the last run is older than this is not that run continuing: either nothing
+ * was running, or it was another process's. A start that follows the last run
+ * more closely is left alone, because a second process of the same release, or
+ * a restart under a crash loop, would otherwise wipe the evidence of a release
+ * that is still running beside another one.
+ */
+const PROCESS_START_GAP = 65;
+
 export interface RunOptions {
   now?: number;
   /** Receives configuration warnings and the class of a check error — never a message or a secret. */
@@ -30,10 +41,10 @@ export interface RunOptions {
   dispatchProbe?: (probe: string) => void | Promise<void>;
   /**
    * This is the first run of a process that has just started. Such a process
-   * is not the run before it continuing: when another release started after
-   * this one last ran, it is back, however short the gap. A rollback inside
-   * RETURN_GAP would otherwise keep the earlier life's heartbeat, whose last
-   * minute is the one the other release took over in.
+   * is judged by a shorter gap (PROCESS_START_GAP): a rollback that restarts
+   * it within RETURN_GAP of the release's last run would otherwise keep the
+   * earlier life's heartbeat, whose last minute is the one the other release
+   * took over in.
    */
   boot?: boolean;
 }
@@ -123,9 +134,7 @@ function isReturning(store: FileStore, commit: string | null, results: Record<st
   if (results !== null) {
     const ranAt = Number.isInteger(results.ran_at) ? (results.ran_at as number) : 0;
     if (now - ranAt > STALE_AFTER) return true;
-    // A live release that another one started beside keeps running every minute; a process that
-    // just started was not running a moment ago, so it has no such excuse.
-    if (!processStart && now - ranAt <= RETURN_GAP) return false;
+    if (now - ranAt <= (processStart ? PROCESS_START_GAP : RETURN_GAP)) return false;
     // Another release started after this one last ran: it was replaced, and is back.
     const own = Store.results(commit);
     for (const name of store.names('results-')) {

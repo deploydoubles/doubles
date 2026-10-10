@@ -179,7 +179,7 @@ describe('a release that comes back', () => {
     /**
      * A runs at minute 0 and minute 1 (its last run, at :00). B starts 15 s later in
      * minute 1 and runs again in minute 2. The rollback restarts A 5 s after B's second
-     * run: 65 s after A's last run, so A looks like a release that missed no minute.
+     * run: 80 s after A's last run, so A looks like a release that missed no minute.
      */
     async function rollBackQuickly(boot: boolean): Promise<{ store: FileStore; config: Config; clock: FakeClock }> {
       const state = setup();
@@ -220,6 +220,43 @@ describe('a release that comes back', () => {
 
     it('reads a run that is not a process start as the run before it continuing (the live overlap guard)', async () => {
       const { store, config, clock } = await rollBackQuickly(false);
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+    });
+
+    it('leaves a release that is still running alone when a second process of it starts beside another release', async () => {
+      const { store, config, clock } = setup();
+
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 0
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 1, A's last run
+      const bootedAt = MINUTE_ZERO;
+      clock.advance(15);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 1: B starts beside A
+      clock.advance(5);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // a second process of A, 20 s after A's last run
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 2
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 2
+      clock.advance(5);
+
+      const report = readReport(store, config, RELEASE_A, clock.now);
+
+      expect(report.deploy.release.booted_at).toBe(iso(bootedAt));
+      expect(report.deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+    });
+
+    it('keeps catching an overlap while one release restarts every minute beside the other', async () => {
+      const { store, config, clock } = setup();
+
+      await tick(store, config, clock, RELEASE_A, RELEASE_A);
+      clock.advance(60);
+      for (let i = 0; i < 5; i++) {
+        await tick(store, config, clock, RELEASE_B, RELEASE_B);
+        clock.advance(15);
+        await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // A crashes and starts again each minute
+        clock.advance(45);
+      }
 
       expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
     });
