@@ -175,11 +175,12 @@ describe('a release that comes back', () => {
     expect(store.read(`results-${RELEASE_A}`)).toMatchObject({ since: firstRun, ran_at: firstRun + 60 });
   });
 
-  describe('a rollback that lands within 90 s of the release\'s last run', () => {
+  describe('a rollback that restarts the process within 90 s of the release\'s last run', () => {
     /**
      * A runs at minute 0 and minute 1 (its last run, at :00). B starts 15 s later in
      * minute 1 and runs again in minute 2. The rollback restarts A 5 s after B's second
-     * run: 80 s after A's last run, so A looks like a release that missed no minute.
+     * run: 80 s after A's last run, so A is not judged to be returning and keeps the
+     * heartbeat of its earlier life, whose minute 1 is the one B took over in.
      */
     async function rollBackQuickly(boot: boolean): Promise<{ store: FileStore; config: Config; clock: FakeClock }> {
       const state = setup();
@@ -199,15 +200,14 @@ describe('a release that comes back', () => {
       return state;
     }
 
-    it('treats the restarted process as the release coming back, so the handover minutes are not an overlap', async () => {
+    it('does not count the handover minutes as an overlap, because A\'s process start is a takeover minute', async () => {
       const { store, config, clock } = await rollBackQuickly(true);
 
       expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.status).toBe('pass');
-      // The earlier life is gone: A took over in minute 2, and B's run in it is the handover.
-      expect(store.read(`heartbeat-${RELEASE_A}`)).toMatchObject({ first_minute: Math.floor((MINUTE_ZERO + 140) / 60) });
+      expect(store.read(`heartbeat-${RELEASE_A}`)).toMatchObject({ started_minute: Math.floor((MINUTE_ZERO + 140) / 60) });
     });
 
-    it('still catches a real overlap after that return', async () => {
+    it('still catches a real overlap after the rollback', async () => {
       const { store, config, clock } = await rollBackQuickly(true);
 
       clock.advance(50);
@@ -218,23 +218,22 @@ describe('a release that comes back', () => {
       expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
     });
 
-    it('reads a run that is not a process start as the run before it continuing (the live overlap guard)', async () => {
+    it('reads the same history as an overlap when the run is not marked as a process start (control)', async () => {
       const { store, config, clock } = await rollBackQuickly(false);
 
       expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
     });
 
-    it('leaves a release that is still running alone when a second process of it starts beside another release', async () => {
+    it('keeps a live release\'s state when a second process of it starts beside another release', async () => {
       const { store, config, clock } = setup();
 
       await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 0
       clock.advance(60);
-      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 1, A's last run
-      const bootedAt = MINUTE_ZERO;
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 1
       clock.advance(15);
       await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 1: B starts beside A
       clock.advance(5);
-      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // a second process of A, 20 s after A's last run
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // a second process of A
       clock.advance(60);
       await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 2
       await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 2
@@ -242,11 +241,11 @@ describe('a release that comes back', () => {
 
       const report = readReport(store, config, RELEASE_A, clock.now);
 
-      expect(report.deploy.release.booted_at).toBe(iso(bootedAt));
+      expect(report.deploy.release.booted_at).toBe(iso(MINUTE_ZERO));
       expect(report.deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
     });
 
-    it('keeps catching an overlap while one release restarts every minute beside the other', async () => {
+    it('keeps catching an overlap while a release crashes and starts again every minute beside the other', async () => {
       const { store, config, clock } = setup();
 
       await tick(store, config, clock, RELEASE_A, RELEASE_A);
@@ -254,24 +253,12 @@ describe('a release that comes back', () => {
       for (let i = 0; i < 5; i++) {
         await tick(store, config, clock, RELEASE_B, RELEASE_B);
         clock.advance(15);
-        await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // A crashes and starts again each minute
+        await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // A starts again, in the minute B ran in
         clock.advance(45);
       }
 
+      // Only the latest start is a takeover minute; the earlier minutes A shared with B count.
       expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
-    });
-
-    it('keeps a restarted process\'s state when no other release started after its last run', async () => {
-      const { store, config, clock } = setup();
-
-      await tick(store, config, clock, RELEASE_A, RELEASE_A, true);
-      const firstRun = clock.now;
-      clock.advance(60);
-      await tick(store, config, clock, RELEASE_A, RELEASE_A);
-      clock.advance(20);
-      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // the process restarted
-
-      expect(store.read(`results-${RELEASE_A}`)).toMatchObject({ since: firstRun });
     });
   });
 

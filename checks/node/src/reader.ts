@@ -92,16 +92,22 @@ function schedulerRelease(store: FileStore, commit: string | null, now: number):
   if (own === null) return at(pending(30, 'waiting for the first heartbeat'), now);
   const beat = Number.isInteger(own.at) ? (own.at as number) : now;
 
-  const first = Number.isInteger(own.first_minute) ? (own.first_minute as number) : null;
-  // The minute this release took over may legitimately contain the previous release's last run.
-  const mine = (Array.isArray(own.minutes) ? own.minutes : []).filter((m): m is number => Number.isInteger(m) && m !== first);
+  // A minute in which either release took over may legitimately contain the other's run: the
+  // minute a release first ran in, and the minute its process last started in (a rollback
+  // restarts the process in a minute the release it replaces ran in). Both sides count: the
+  // replaced release's last run is in the minute the new one took over.
+  const takeover = (heartbeat: Record<string, unknown> | null): number[] =>
+    [heartbeat?.first_minute, heartbeat?.started_minute].filter((m): m is number => Number.isInteger(m));
+  const ownTakeover = takeover(own);
+  const mine = (Array.isArray(own.minutes) ? own.minutes : []).filter((m): m is number => Number.isInteger(m) && !ownTakeover.includes(m));
 
   const ownName = Store.heartbeat(commit);
   for (const name of store.names('heartbeat-')) {
     if (name === ownName) continue;
     const other = store.read(name);
+    const theirTakeover = takeover(other);
     const theirs = Array.isArray(other?.minutes) ? (other!.minutes as unknown[]) : [];
-    if (mine.some((minute) => theirs.includes(minute))) {
+    if (mine.some((minute) => !theirTakeover.includes(minute) && theirs.includes(minute))) {
       return at(fail('scheduler_release_mismatch', 'heartbeats from more than one commit in the same minute'), beat);
     }
   }

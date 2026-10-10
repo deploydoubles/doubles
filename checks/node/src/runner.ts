@@ -17,21 +17,9 @@ const OTHER_RELEASE_TTL = 3600;
 /**
  * A release whose last run is older than this (more than one missed minute),
  * while another release started in between, has come back: a rollback or a
- * redeploy of a commit that ran before. A process that has just started does
- * not wait for the gap (see RunOptions.boot).
+ * redeploy of a commit that ran before.
  */
 const RETURN_GAP = 90;
-
-/**
- * The same judgement for the first run of a process that has just started. A
- * running scheduler leaves a run every minute, so a process that starts while
- * the last run is older than this is not that run continuing: either nothing
- * was running, or it was another process's. A start that follows the last run
- * more closely is left alone, because a second process of the same release, or
- * a restart under a crash loop, would otherwise wipe the evidence of a release
- * that is still running beside another one.
- */
-const PROCESS_START_GAP = 65;
 
 export interface RunOptions {
   now?: number;
@@ -40,11 +28,10 @@ export interface RunOptions {
   /** Dispatches a probe job carrying the probe's store name; the worker answers it with answerProbe. */
   dispatchProbe?: (probe: string) => void | Promise<void>;
   /**
-   * This is the first run of a process that has just started. Such a process
-   * is judged by a shorter gap (PROCESS_START_GAP): a rollback that restarts
-   * it within RETURN_GAP of the release's last run would otherwise keep the
-   * earlier life's heartbeat, whose last minute is the one the other release
-   * took over in.
+   * This is the first run of a process that has just started. The heartbeat
+   * records its minute as a takeover minute (`started_minute`): a rollback
+   * restarts the process in a minute the other release may also have run in,
+   * and that minute is a handover, not an overlap.
    */
   boot?: boolean;
 }
@@ -64,7 +51,7 @@ export async function runChecks(
 ): Promise<Record<string, CheckResult>> {
   const now = options.now ?? epoch();
   let previous = store.read(Store.results(commit));
-  if (isReturning(store, commit, previous, now, options.boot === true)) {
+  if (isReturning(store, commit, previous, now)) {
     forgetEarlierLife(store, commit);
     previous = null;
   }
@@ -118,7 +105,7 @@ export async function runChecks(
     ran_at: now,
     checks: Object.fromEntries(Object.entries(results).map(([name, result]) => [name, toStore(result)])),
   });
-  heartbeat(store, commit, now);
+  heartbeat(store, commit, now, options.boot === true);
   prune(store, commit, now);
 
   return results;
@@ -130,11 +117,11 @@ export async function runChecks(
  * heartbeat and boot marker then describe a different deployment and must not
  * be read as this one's.
  */
-function isReturning(store: FileStore, commit: string | null, results: Record<string, unknown> | null, now: number, processStart: boolean): boolean {
+function isReturning(store: FileStore, commit: string | null, results: Record<string, unknown> | null, now: number): boolean {
   if (results !== null) {
     const ranAt = Number.isInteger(results.ran_at) ? (results.ran_at as number) : 0;
     if (now - ranAt > STALE_AFTER) return true;
-    if (now - ranAt <= (processStart ? PROCESS_START_GAP : RETURN_GAP)) return false;
+    if (now - ranAt <= RETURN_GAP) return false;
     // Another release started after this one last ran: it was replaced, and is back.
     const own = Store.results(commit);
     for (const name of store.names('results-')) {
@@ -170,16 +157,20 @@ export function errorClass(error: unknown): string {
   return typeof name === 'string' && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(name) ? name : 'Object';
 }
 
-function heartbeat(store: FileStore, commit: string | null, now: number): void {
+function heartbeat(store: FileStore, commit: string | null, now: number, processStart: boolean): void {
   const name = Store.heartbeat(commit);
   const previous = store.read(name) ?? {};
   const minute = Math.floor(now / 60);
   const minutes = (Array.isArray(previous.minutes) ? previous.minutes : []).filter((m): m is number => Number.isInteger(m));
   minutes.push(minute);
+  // Only the latest start is a takeover minute: a process that crashes and starts again every
+  // minute beside another release must not make every one of its minutes exempt.
+  const startedMinute = processStart ? minute : Number.isInteger(previous.started_minute) ? previous.started_minute : null;
   store.write(name, {
     commit: Store.key(commit),
     at: now,
     first_minute: Number.isInteger(previous.first_minute) ? previous.first_minute : minute,
+    ...(startedMinute !== null ? { started_minute: startedMinute } : {}),
     minutes: [...new Set(minutes)].slice(-MINUTES_KEPT),
   });
 }
