@@ -75,7 +75,7 @@ Commit `deploy-report.config.json` in the app root:
 
 An app with a queue worker can declare `queue` and `queue.release`: pass `dispatchProbe` to `startDeployReport` to enqueue a job carrying the probe name, and call `answerDeployReportProbe(probe)` from that job. A probe left unanswered for two minutes fails `queue`. Declaring `queue` or `queue.release` without passing `dispatchProbe` fails `queue` at once with `queue_driver_mismatch` (and skips `queue.release`), rather than leaving it pending.
 
-Every `checked_at` dates the evidence (the scheduled run, the heartbeat, the answered probe), never the request. When a release comes back — a rollback, or a redeploy of a commit that ran before — its first scheduled run discards what its earlier life left in the store and starts fresh, so `booted_at` is when it was first seen running again.
+Every `checked_at` dates the evidence (the scheduled run, the heartbeat, the answered probe), never the request. When a release comes back — a rollback, or a redeploy of a commit that ran before — its first scheduled run discards what its earlier life left in the store and starts fresh, so `booted_at` is when it was first seen running again. The in-process scheduler marks its first run after the process starts, so a rollback that restarts the process within 90 seconds of the release's last run is still recognised as a return.
 
 ## Security
 

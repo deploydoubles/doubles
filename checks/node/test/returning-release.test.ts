@@ -25,10 +25,14 @@ function setup(): { store: FileStore; config: Config; clock: FakeClock } {
   return { store: new FileStore(config.storePath), config, clock: new FakeClock(MINUTE_ZERO) };
 }
 
-/** One scheduled run of `commit`; `answeredBy` is the commit of the worker that answers the probe at once, or null for no worker. */
-async function tick(store: FileStore, config: Config, clock: FakeClock, commit: string, answeredBy: string | null): Promise<void> {
+/**
+ * One scheduled run of `commit`; `answeredBy` is the commit of the worker that answers the probe at once, or null for no worker.
+ * `boot` marks the first run of a process that has just started.
+ */
+async function tick(store: FileStore, config: Config, clock: FakeClock, commit: string, answeredBy: string | null, boot = false): Promise<void> {
   await runChecks(store, config, commit, { queue: async () => pass('ok', 'redis', 'redis 7.4') }, {
     now: clock.now,
+    boot,
     dispatchProbe: (probe) => {
       if (answeredBy !== null) answerProbe(store, probe, answeredBy, clock.now);
     },
@@ -169,6 +173,69 @@ describe('a release that comes back', () => {
     await tick(store, config, clock, RELEASE_A, RELEASE_A);
 
     expect(store.read(`results-${RELEASE_A}`)).toMatchObject({ since: firstRun, ran_at: firstRun + 60 });
+  });
+
+  describe('a rollback that lands within 90 s of the release\'s last run', () => {
+    /**
+     * A runs at minute 0 and minute 1 (its last run, at :00). B starts 15 s later in
+     * minute 1 and runs again in minute 2. The rollback restarts A 5 s after B's second
+     * run: 65 s after A's last run, so A looks like a release that missed no minute.
+     */
+    async function rollBackQuickly(boot: boolean): Promise<{ store: FileStore; config: Config; clock: FakeClock }> {
+      const state = setup();
+      const { store, config, clock } = state;
+
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 0
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 1, A's last run
+      clock.advance(15);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 1: B takes over
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 2
+      clock.advance(5);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, boot); // minute 2: A's process starts again
+      clock.advance(5);
+
+      return state;
+    }
+
+    it('treats the restarted process as the release coming back, so the handover minutes are not an overlap', async () => {
+      const { store, config, clock } = await rollBackQuickly(true);
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.status).toBe('pass');
+      // The earlier life is gone: A took over in minute 2, and B's run in it is the handover.
+      expect(store.read(`heartbeat-${RELEASE_A}`)).toMatchObject({ first_minute: Math.floor((MINUTE_ZERO + 140) / 60) });
+    });
+
+    it('still catches a real overlap after that return', async () => {
+      const { store, config, clock } = await rollBackQuickly(true);
+
+      clock.advance(50);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 3
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 3
+      clock.advance(5);
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+    });
+
+    it('reads a run that is not a process start as the run before it continuing (the live overlap guard)', async () => {
+      const { store, config, clock } = await rollBackQuickly(false);
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+    });
+
+    it('keeps a restarted process\'s state when no other release started after its last run', async () => {
+      const { store, config, clock } = setup();
+
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, true);
+      const firstRun = clock.now;
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A);
+      clock.advance(20);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // the process restarted
+
+      expect(store.read(`results-${RELEASE_A}`)).toMatchObject({ since: firstRun });
+    });
   });
 
   it('keeps the state of a release whose scheduler runs every minute next to another one', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "@deploydoubles/checks",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generates the deploy report (/.well-known/deploy-report) for Node.js apps: a Next.js route handler and an in-process scheduler.",
   "license": "MIT",
   "author": "Jan Peter Wiersma",

@@ -53,12 +53,17 @@ export interface DeployReportOptions {
 
 /** Runs the declared checks once and stores the results. */
 export async function runDeployReport(options: DeployReportOptions = {}): Promise<void> {
+  return run(options, false);
+}
+
+async function run(options: DeployReportOptions, boot: boolean): Promise<void> {
   const root = options.root ?? process.cwd();
   const config = loadConfig(root);
   const commit = resolveCommit(root);
   const checks = nodeChecks(config, commit, options.database, options.timing?.checkTimeoutMs ?? CHECK_TIMEOUT_MS);
   await runChecks(new FileStore(config.storePath), config, commit, checks, {
     warn: (message) => console.warn(`deploy-report: ${message}`),
+    boot,
     ...(options.dispatchProbe ? { dispatchProbe: options.dispatchProbe } : {}),
   });
 }
@@ -86,10 +91,14 @@ export function startDeployReport(options: DeployReportOptions = {}): void {
 
   const runTimeoutMs = options.timing?.runTimeoutMs ?? RUN_TIMEOUT_MS;
   let running = false;
+  let booting = true;
   const tick = (): void => {
     if (running) return;
     running = true;
-    within(runDeployReport(options), runTimeoutMs)
+    // Only this process's first run is a start; the ones after it continue it.
+    const boot = booting;
+    booting = false;
+    within(run(options, boot), runTimeoutMs)
       .catch((error: unknown) =>
         console.warn(error === RUN_TIMED_OUT ? 'deploy-report: the scheduled run did not finish in time' : 'deploy-report: the scheduled run failed'),
       )

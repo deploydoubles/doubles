@@ -17,7 +17,8 @@ const OTHER_RELEASE_TTL = 3600;
 /**
  * A release whose last run is older than this (more than one missed minute),
  * while another release started in between, has come back: a rollback or a
- * redeploy of a commit that ran before.
+ * redeploy of a commit that ran before. A process that has just started does
+ * not wait for the gap (see RunOptions.boot).
  */
 const RETURN_GAP = 90;
 
@@ -27,6 +28,14 @@ export interface RunOptions {
   warn?: (message: string) => void;
   /** Dispatches a probe job carrying the probe's store name; the worker answers it with answerProbe. */
   dispatchProbe?: (probe: string) => void | Promise<void>;
+  /**
+   * This is the first run of a process that has just started. Such a process
+   * is not the run before it continuing: when another release started after
+   * this one last ran, it is back, however short the gap. A rollback inside
+   * RETURN_GAP would otherwise keep the earlier life's heartbeat, whose last
+   * minute is the one the other release took over in.
+   */
+  boot?: boolean;
 }
 
 /**
@@ -44,7 +53,7 @@ export async function runChecks(
 ): Promise<Record<string, CheckResult>> {
   const now = options.now ?? epoch();
   let previous = store.read(Store.results(commit));
-  if (isReturning(store, commit, previous, now)) {
+  if (isReturning(store, commit, previous, now, options.boot === true)) {
     forgetEarlierLife(store, commit);
     previous = null;
   }
@@ -110,11 +119,13 @@ export async function runChecks(
  * heartbeat and boot marker then describe a different deployment and must not
  * be read as this one's.
  */
-function isReturning(store: FileStore, commit: string | null, results: Record<string, unknown> | null, now: number): boolean {
+function isReturning(store: FileStore, commit: string | null, results: Record<string, unknown> | null, now: number, processStart: boolean): boolean {
   if (results !== null) {
     const ranAt = Number.isInteger(results.ran_at) ? (results.ran_at as number) : 0;
     if (now - ranAt > STALE_AFTER) return true;
-    if (now - ranAt <= RETURN_GAP) return false;
+    // A live release that another one started beside keeps running every minute; a process that
+    // just started was not running a moment ago, so it has no such excuse.
+    if (!processStart && now - ranAt <= RETURN_GAP) return false;
     // Another release started after this one last ran: it was replaced, and is back.
     const own = Store.results(commit);
     for (const name of store.names('results-')) {
