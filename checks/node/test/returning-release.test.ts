@@ -203,8 +203,52 @@ describe('a release that comes back', () => {
     it('does not count the handover minutes as an overlap, because A\'s process start is a takeover minute', async () => {
       const { store, config, clock } = await rollBackQuickly(true);
 
-      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.status).toBe('pass');
+      // In the minute A started in nothing yet says whether B has stopped: not a pass, not a failure.
+      const inTheStartMinute = readReport(store, config, RELEASE_A, clock.now);
+      expect(inTheStartMinute.deploy.checks['scheduler.release']?.status).toBe('pending');
+      expect(inTheStartMinute.deploy.settled).toBe(false);
       expect(store.read(`heartbeat-${RELEASE_A}`)).toMatchObject({ started_minute: Math.floor((MINUTE_ZERO + 140) / 60) });
+
+      // A's next run, B silent: the handover is confirmed.
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 3
+      clock.advance(5);
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.status).toBe('pass');
+    });
+
+    it('does not let a process that starts in the middle of an overlap turn either release\'s report green', async () => {
+      const { store, config, clock } = setup();
+
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 0
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 1
+      clock.advance(15);
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 1: B starts beside A
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 2: both run
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 2
+
+      expect(readReport(store, config, RELEASE_A, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+
+      clock.advance(5);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A, true); // a second process of A, still minute 2
+      clock.advance(5);
+
+      for (const commit of [RELEASE_A, RELEASE_B]) {
+        const status = readReport(store, config, commit, clock.now).deploy.checks['scheduler.release']?.status;
+        expect(status === 'pass').toBe(false);
+      }
+
+      // Both keep running into minute 3: it is reported again.
+      clock.advance(60);
+      await tick(store, config, clock, RELEASE_A, RELEASE_A); // minute 3
+      await tick(store, config, clock, RELEASE_B, RELEASE_B); // minute 3
+      clock.advance(5);
+
+      for (const commit of [RELEASE_A, RELEASE_B]) {
+        expect(readReport(store, config, commit, clock.now).deploy.checks['scheduler.release']?.code).toBe('scheduler_release_mismatch');
+      }
     });
 
     it('still catches a real overlap after the rollback', async () => {
