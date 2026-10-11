@@ -27,6 +27,13 @@ export interface RunOptions {
   warn?: (message: string) => void;
   /** Dispatches a probe job carrying the probe's store name; the worker answers it with answerProbe. */
   dispatchProbe?: (probe: string) => void | Promise<void>;
+  /**
+   * This is the first run of a process that has just started. The heartbeat
+   * records its minute as a takeover minute (`started_minute`): a rollback
+   * restarts the process in a minute the other release may also have run in,
+   * and that minute is a handover, not an overlap.
+   */
+  boot?: boolean;
 }
 
 /**
@@ -98,7 +105,7 @@ export async function runChecks(
     ran_at: now,
     checks: Object.fromEntries(Object.entries(results).map(([name, result]) => [name, toStore(result)])),
   });
-  heartbeat(store, commit, now);
+  heartbeat(store, commit, now, options.boot === true);
   prune(store, commit, now);
 
   return results;
@@ -150,16 +157,20 @@ export function errorClass(error: unknown): string {
   return typeof name === 'string' && /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/.test(name) ? name : 'Object';
 }
 
-function heartbeat(store: FileStore, commit: string | null, now: number): void {
+function heartbeat(store: FileStore, commit: string | null, now: number, processStart: boolean): void {
   const name = Store.heartbeat(commit);
   const previous = store.read(name) ?? {};
   const minute = Math.floor(now / 60);
   const minutes = (Array.isArray(previous.minutes) ? previous.minutes : []).filter((m): m is number => Number.isInteger(m));
   minutes.push(minute);
+  // Only the latest start is a takeover minute: a process that crashes and starts again every
+  // minute beside another release must not make every one of its minutes exempt.
+  const startedMinute = processStart ? minute : Number.isInteger(previous.started_minute) ? previous.started_minute : null;
   store.write(name, {
     commit: Store.key(commit),
     at: now,
     first_minute: Number.isInteger(previous.first_minute) ? previous.first_minute : minute,
+    ...(startedMinute !== null ? { started_minute: startedMinute } : {}),
     minutes: [...new Set(minutes)].slice(-MINUTES_KEPT),
   });
 }
