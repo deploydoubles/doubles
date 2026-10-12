@@ -24,7 +24,7 @@ A manifest says what an application needs and which checks must pass once it is 
 | `release` | no | Commands that run once per release before it serves (e.g. migrations) |
 | `persistent_paths` | no | Directories, relative to the app root, that must survive every deploy and be shared by all processes and releases — see below |
 | `expects` | yes | `inside`: inside check names that must pass; `outside`: outside check names that must pass |
-| `failure_modes` | no | Deliberate failures the double can produce (reserved; empty in v0.1) |
+| `failure_modes` | no | Deliberate failures the double can produce: `{ "id", "stage", "expect" }` per mode — see [failure modes](failure-modes.md). `[]` or absent when none |
 
 ### `services`
 
