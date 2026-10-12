@@ -72,8 +72,18 @@
       }
     },
     "failure_modes": {
+      "description": "Deliberate failures the double can produce when DOUBLE_FAIL=<mode>@<commit> names its own commit (failure-modes.md). Each mode has one fixed stage and expectation.",
       "type": "array",
-      "maxItems": 0
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          { "const": { "id": "build", "stage": "build", "expect": "rejected" } },
+          { "const": { "id": "migrate", "stage": "release", "expect": "rejected" } },
+          { "const": { "id": "boot", "stage": "start", "expect": "rejected" } },
+          { "const": { "id": "500", "stage": "request", "expect": "rejected" } },
+          { "const": { "id": "slow-boot", "stage": "start", "expect": "accepted" } }
+        ]
+      }
     }
   },
   "$defs": {

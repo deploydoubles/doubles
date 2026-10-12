@@ -8,6 +8,7 @@ Authored by Jan Peter Wiersma. Licensed under [CC BY 4.0](LICENSE).
 | [security.md](security.md) | The two tiers, the token, and what a report never contains |
 | [outside-checks.md](outside-checks.md) | What a verifier observes from outside, and its exit codes |
 | [manifest.md](manifest.md) | `double.json`: what an application needs and which checks must pass |
+| [failure-modes.md](failure-modes.md) | `DOUBLE_FAIL`: how a double fails on purpose, and what a platform should do with the bad release |
 
 JSON Schemas (2020-12): [`schema/report-v0.1.json`](schema/report-v0.1.json), [`schema/manifest-v0.1.json`](schema/manifest-v0.1.json). Examples are in [`examples/`](examples/).
 

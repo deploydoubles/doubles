@@ -30,3 +30,17 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 - The report is at `/.well-known/deploy-report`; `/up` returns 200 when the process is alive.
 - Checks run once a minute from the scheduler and are stored in `storage/deploy-report/`. Allow at least two minutes after the deploy before expecting a settled report.
 - Without a worker, `queue` turns `fail` about two minutes after the first probe. Without a scheduler, the report shows only `scheduler: fail`.
+
+## Failure modes
+
+To test what a platform does with a bad release, set `DOUBLE_FAIL=<mode>@<commit>` in the app's environment and deploy that commit. The double fails on purpose only on the release whose commit the value names; every other release, including the one before it, behaves normally. The modes are listed in `double.json` (`failure_modes`) and defined in [the failure modes spec](https://github.com/deploydoubles/doubles/blob/main/spec/failure-modes.md).
+
+| Mode | What fails | A platform that works |
+|---|---|---|
+| `build` | `php artisan package:discover`, which `composer install` runs | Fails the deploy; the previous release keeps serving |
+| `migrate` | `php artisan migrate --force` | Fails the deploy; the previous release keeps serving |
+| `boot` | Every web request answers 500, the report and `/up` included. Console commands still work | Fails the deploy and puts the previous release back |
+| `500` | `/` answers 500; the report and `/up` keep answering | Fails the deploy and puts the previous release back |
+| `slow-boot` | Every web request answers 503 until 20 seconds after the release's first request, then serves | Completes the deploy; the new release serves |
+
+The value is read through `config('double.fail')` (`config/double.php`), so it works with the configuration cached. Remove the variable when you are done.
