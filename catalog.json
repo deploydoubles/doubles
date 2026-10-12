@@ -69,7 +69,33 @@
           "detection"
         ]
       },
-      "failure_modes": [],
+      "failure_modes": [
+        {
+          "id": "build",
+          "stage": "build",
+          "expect": "rejected"
+        },
+        {
+          "id": "migrate",
+          "stage": "release",
+          "expect": "rejected"
+        },
+        {
+          "id": "boot",
+          "stage": "start",
+          "expect": "rejected"
+        },
+        {
+          "id": "500",
+          "stage": "request",
+          "expect": "rejected"
+        },
+        {
+          "id": "slow-boot",
+          "stage": "start",
+          "expect": "accepted"
+        }
+      ],
       "repository": "https://github.com/deploydoubles/laravel-mysql-redis-worker",
       "broken": false
     },
@@ -126,7 +152,23 @@
           "detection"
         ]
       },
-      "failure_modes": [],
+      "failure_modes": [
+        {
+          "id": "boot",
+          "stage": "start",
+          "expect": "rejected"
+        },
+        {
+          "id": "500",
+          "stage": "request",
+          "expect": "rejected"
+        },
+        {
+          "id": "slow-boot",
+          "stage": "start",
+          "expect": "accepted"
+        }
+      ],
       "repository": "https://github.com/deploydoubles/nextjs-postgres",
       "broken": false
     },

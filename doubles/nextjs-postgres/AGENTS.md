@@ -31,3 +31,15 @@ This repository is a deploy double: a test app whose only job is to be deployed 
 - Checks run in the server process, started from `instrumentation.ts`: once at boot, then every 60 seconds. Results are stored in `storage/deploy-report/`.
 - The database is read from `DATABASE_URL`, or from the libpq variables `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` and `PGPASSWORD` when `DATABASE_URL` is unset.
 - This is a Node app only: no PHP, no `composer.json`. A platform that asks for PHP has misdetected it.
+
+## Failure modes
+
+To test what a platform does with a bad release, set `DOUBLE_FAIL=<mode>@<commit>` in the app's environment and deploy that commit. The double fails on purpose only on the release whose commit the value names; every other release, including the one before it, behaves normally. The modes are listed in `double.json` (`failure_modes`) and defined in [the failure modes spec](https://github.com/deploydoubles/doubles/blob/main/spec/failure-modes.md).
+
+| Mode | What fails | A platform that works |
+|---|---|---|
+| `boot` | `instrumentation.ts` throws at start: every request answers 500, the report and `/up` included | Fails the deploy and puts the previous release back |
+| `500` | `/` answers 500; the report and `/up` keep answering | Fails the deploy and puts the previous release back |
+| `slow-boot` | The server holds requests for 20 seconds after it starts, then answers them | Completes the deploy; the new release serves |
+
+There is no `build` mode: the variable is read at run time, and a build step often runs without the app's environment. Remove the variable when you are done.

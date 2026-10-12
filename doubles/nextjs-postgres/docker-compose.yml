@@ -19,6 +19,9 @@ services:
       # URL style (node-postgres also reads PGHOST, PGPORT, PGDATABASE, PGUSER
       # and PGPASSWORD when DATABASE_URL is unset: the double accepts both).
       DATABASE_URL: postgresql://double:double@postgres:5432/double
+      # Passed through only when the caller sets it (scripts/conformance-failure.sh):
+      # DOUBLE_FAIL=<mode>@<commit> makes the double fail on purpose.
+      DOUBLE_FAIL:
     ports:
       - "${DD_PORT:-8080}:8080"
     volumes:
