@@ -3,11 +3,14 @@
 # Starts a double with Docker Compose, makes it fail on purpose and asserts the failure
 # (spec/failure-modes.md).
 #
-#   scripts/conformance-failure.sh <double> <mode> [--other-commit]
+#   scripts/conformance-failure.sh <double> <mode> [--other-commit | --without-variable]
 #
-#   <mode>          a mode the double lists in failure_modes (double.json)
-#   --other-commit  set DOUBLE_FAIL=<mode>@<another commit> instead, and assert the double stays
-#                   healthy: a mode fires only on the release whose commit it names
+#   <mode>              a mode the double lists in failure_modes (double.json)
+#   --other-commit      set DOUBLE_FAIL=<mode>@<another commit> instead, and assert the double stays
+#                       healthy: a mode fires only on the release whose commit it names
+#   --without-variable  a control for this script: recreate the app without DOUBLE_FAIL and run the
+#                       mode's assertions anyway. The double does not fail, so they must, and the
+#                       script must exit 1. A run that exits 0 means the assertions cannot fail.
 #
 # The stack first starts healthy without DOUBLE_FAIL (docker compose up --wait). Then only the app
 # container is recreated with DOUBLE_FAIL=<mode>@<REVISION>, without --wait: a failing double never
@@ -34,7 +37,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
-  echo "usage: scripts/conformance-failure.sh <double> <mode> [--other-commit]" >&2
+  echo "usage: scripts/conformance-failure.sh <double> <mode> [--other-commit | --without-variable]" >&2
   exit 64
 }
 
@@ -44,12 +47,15 @@ mode="$2"
 shift 2
 
 other_commit=0
+without_variable=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --other-commit) other_commit=1; shift ;;
+    --without-variable) without_variable=1; shift ;;
     *) usage ;;
   esac
 done
+[ "$other_commit" -eq 0 ] || [ "$without_variable" -eq 0 ] || usage
 
 case "$double" in
   */* | .* | "") usage ;;
@@ -79,7 +85,7 @@ else
   commit="$REVISION"
 fi
 value="$mode@$commit"
-label="$double $mode$([ "$other_commit" -eq 0 ] || echo ' (other commit)')"
+label="$double $mode$([ "$other_commit" -eq 0 ] || echo ' (other commit)')$([ "$without_variable" -eq 0 ] || echo ' (without variable)')"
 
 compose=(docker compose --project-name "$project" --file "$compose_file")
 
@@ -213,8 +219,13 @@ fi
 
 # ── 2. The app again, with the variable ──────────────────────────────────────────────────────────
 
-echo "conformance-failure: recreating the app with DOUBLE_FAIL=$value" >&2
-DOUBLE_FAIL="$value" "${compose[@]}" up --detach --no-deps --force-recreate app >&2
+if [ "$without_variable" -eq 1 ]; then
+  echo "conformance-failure: recreating the app without DOUBLE_FAIL (control: the assertions must fail)" >&2
+  env -u DOUBLE_FAIL "${compose[@]}" up --detach --no-deps --force-recreate app >&2
+else
+  echo "conformance-failure: recreating the app with DOUBLE_FAIL=$value" >&2
+  DOUBLE_FAIL="$value" "${compose[@]}" up --detach --no-deps --force-recreate app >&2
+fi
 started="$(now)"
 
 # ── 3. What the mode must do ─────────────────────────────────────────────────────────────────────

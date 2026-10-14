@@ -86,6 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       doubles: ${{ steps.pick.outputs.doubles }}
+      failure_cells: ${{ steps.pick.outputs.failure_cells }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -107,6 +108,26 @@ jobs:
             fi
           fi
           echo "doubles=$(echo "$selected" | jq -R . | jq -cs 'map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+          # The failure modes each selected double declares, one cell per mode, plus two cells per
+          # double that guard the others: the same mode on another commit (the double must stay
+          # healthy) and the same mode with no variable at all (the assertions must fail). `boot`
+          # carries both when declared, otherwise the first rejected mode.
+          cells=""
+          for double in $selected; do
+            manifest="doubles/$double/double.json"
+            modes=$(jq -r '.failure_modes[]?.id' "$manifest")
+            [ -n "$modes" ] || continue
+            guard=$(jq -r '[.failure_modes[] | select(.expect == "rejected") | .id] as $r | (if ($r | index("boot")) then "boot" else ($r[0] // empty) end)' "$manifest")
+            for mode in $modes; do
+              cells="${cells}$(jq -cn --arg d "$double" --arg m "$mode" '{double: $d, mode: $m, kind: "fires"}')"$'\n'
+            done
+            if [ -n "$guard" ]; then
+              cells="${cells}$(jq -cn --arg d "$double" --arg m "$guard" '{double: $d, mode: $m, kind: "other-commit"}')"$'\n'
+              cells="${cells}$(jq -cn --arg d "$double" --arg m "$guard" '{double: $d, mode: $m, kind: "control"}')"$'\n'
+            fi
+          done
+          echo "failure_cells=$(printf '%s' "$cells" | jq -cs 'map(select(. != null))')" >> "$GITHUB_OUTPUT"
 
   double:
     needs: [changed, verifier]
@@ -175,3 +196,50 @@ jobs:
             fi
           done
           exit "$failed"
+
+  # Every failure mode a double declares, run the way a platform would meet it (spec/failure-modes.md).
+  failure:
+    needs: [changed, verifier]
+    if: needs.changed.outputs.failure_cells != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cell: ${{ fromJSON(needs.changed.outputs.failure_cells) }}
+    name: failure (${{ matrix.cell.double }} ${{ matrix.cell.mode }} ${{ matrix.cell.kind }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Build the verifier
+        run: npm ci && npm run build
+        working-directory: verifier
+      - name: Conformance
+        env:
+          DOUBLE: ${{ matrix.cell.double }}
+          MODE: ${{ matrix.cell.mode }}
+          KIND: ${{ matrix.cell.kind }}
+        run: |
+          case "$KIND" in
+            fires)
+              scripts/conformance-failure.sh "$DOUBLE" "$MODE"
+              ;;
+            other-commit)
+              scripts/conformance-failure.sh "$DOUBLE" "$MODE" --other-commit
+              ;;
+            # The control: without the variable the double does not fail, so the mode's assertions
+            # must. Exit 1 is "an assertion failed"; 0 would mean they cannot fail, and anything
+            # else (64, a crash) is not the control working.
+            control)
+              set +e
+              scripts/conformance-failure.sh "$DOUBLE" "$MODE" --without-variable
+              code=$?
+              set -e
+              if [ "$code" -ne 1 ]; then
+                echo "::error::$DOUBLE $MODE without the variable exited $code, expected 1: the assertions did not fail on a double that does not fail"
+                exit 1
+              fi
+              echo "$DOUBLE $MODE without the variable: the assertions failed, as they must"
+              ;;
+          esac

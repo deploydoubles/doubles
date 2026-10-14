@@ -72,4 +72,4 @@ The [schema](schema/manifest-v0.1.json) accepts only the combinations in the tab
 
 ## Conformance
 
-`scripts/conformance-failure.sh <double> <mode>` starts a double with Docker Compose without the variable, waits until it is healthy, restarts its web process with `DOUBLE_FAIL=<mode>@<commit>`, and asserts what the mode does. `--other-commit` names a different commit instead and asserts that the double stays healthy.
+`scripts/conformance-failure.sh <double> <mode>` starts a double with Docker Compose without the variable, waits until it is healthy, restarts its web process with `DOUBLE_FAIL=<mode>@<commit>`, and asserts what the mode does. `--other-commit` names a different commit instead and asserts that the double stays healthy. `--without-variable` is a control for the script itself: it recreates the app without the variable and runs the mode's assertions anyway, which must fail, so the script exits `1`. This repository's CI runs every declared mode of a double, plus an `--other-commit` run and a `--without-variable` run of one rejected mode.
