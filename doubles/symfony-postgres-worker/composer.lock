@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "deploydoubles/checks-php",
-            "version": "v0.1.1",
+            "version": "v0.1.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/deploydoubles/checks-php.git",
-                "reference": "9d248db76e82423c43db2e1cfa82a0df34f66ba2"
+                "reference": "1122031d674664c02a8cd254f7fc6e03527c8392"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/deploydoubles/checks-php/zipball/9d248db76e82423c43db2e1cfa82a0df34f66ba2",
-                "reference": "9d248db76e82423c43db2e1cfa82a0df34f66ba2",
+                "url": "https://api.github.com/repos/deploydoubles/checks-php/zipball/1122031d674664c02a8cd254f7fc6e03527c8392",
+                "reference": "1122031d674664c02a8cd254f7fc6e03527c8392",
                 "shasum": ""
             },
             "require": {
@@ -74,9 +74,9 @@
                 "verification"
             ],
             "support": {
-                "source": "https://github.com/deploydoubles/checks-php/tree/v0.1.1"
+                "source": "https://github.com/deploydoubles/checks-php/tree/v0.1.2"
             },
-            "time": "2026-10-07T20:44:46+00:00"
+            "time": "2026-10-16T15:33:46+00:00"
         },
         {
             "name": "doctrine/dbal",
