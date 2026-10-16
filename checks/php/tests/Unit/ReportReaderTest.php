@@ -179,6 +179,22 @@ it('passes queue.release once the newer probe is answered by this release', func
         ->and($report['deploy']['settled'])->toBeTrue();
 });
 
+it('passes queue.release for a worker on this release even while a newer probe is still in flight', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, COMMIT, $clock->now));
+    $clock->advance(60);
+    runOnce($store, $config, $clock, function (string $p): void {});
+    $clock->advance(1);
+    $report = readReport($store, $config, $clock);
+
+    expect($report['deploy']['checks']['queue']['status'])->toBe('pass')
+        ->and($report['deploy']['checks']['queue.release']['status'])->toBe('pass');
+});
+
 it('keeps queue.release pending for a worker whose answers always arrive after the next probe is dispatched', function () {
     $dir = tempDir();
     $store = new FileStore($dir);

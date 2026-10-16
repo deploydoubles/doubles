@@ -195,6 +195,18 @@ describe('the queue', () => {
     expect(report.deploy.settled).toBe(true);
   });
 
+  it('passes queue.release for a worker on this release even while a newer probe is still in flight', async () => {
+    const { store, config, clock } = setup();
+    await runOnce(store, config, clock, (p) => answerProbe(store, p, COMMIT, clock.now));
+    clock.advance(60);
+    await runOnce(store, config, clock, () => {});
+    clock.advance(1);
+    const report = read(store, config, clock);
+
+    expect(report.deploy.checks.queue?.status).toBe('pass');
+    expect(report.deploy.checks['queue.release']?.status).toBe('pass');
+  });
+
   it('keeps queue.release pending for a worker whose answers always arrive after the next probe is dispatched', async () => {
     const { store, config, clock } = setup();
 
