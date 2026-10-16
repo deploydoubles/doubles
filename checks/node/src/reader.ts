@@ -189,10 +189,19 @@ function queue(store: FileStore, commit: string | null, config: CheckResult | nu
 
   const answeredAt = answered.answered_at;
   const queueResult = at(pass(`latest probe answered after ${Math.max(0, answeredAt - answered.dispatched_at)} s`, expected, observed), answeredAt);
-  const release =
-    commit !== null && answered.worker_commit === Store.key(commit)
-      ? at(pass('the worker runs this release'), answeredAt)
-      : at(fail('queue_release_mismatch', 'the worker that answered the latest probe runs a different commit'), answeredAt);
+  let release: CheckResult;
+  if (commit !== null && answered.worker_commit === Store.key(commit)) {
+    release = at(pass('the worker runs this release'), answeredAt);
+  } else if (outstanding.length > 0) {
+    // A probe dispatched after the answered one is still in flight, and the
+    // answer may predate a worker restart: it says which release a worker runs
+    // now. Judging the older answer would report a transient as a verdict. A
+    // worker that never reloaded answers the newer probe with the old commit
+    // too, and the result is then a fail.
+    release = at(pending(5, 'waiting for the newest probe to be processed'), now);
+  } else {
+    release = at(fail('queue_release_mismatch', 'the worker that answered the latest probe runs a different commit'), answeredAt);
+  }
 
   return [queueResult, release];
 }

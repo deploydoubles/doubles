@@ -245,9 +245,18 @@ final class ReportReader
             $at,
         );
 
-        $release = ($answered['worker_commit'] ?? null) === Store::key($this->commit) && $this->commit !== null
-            ? CheckResult::pass('the worker runs this release', checkedAt: $at)
-            : CheckResult::fail(Codes::QUEUE_RELEASE_MISMATCH, 'the worker that answered the latest probe runs a different commit', checkedAt: $at);
+        if (($answered['worker_commit'] ?? null) === Store::key($this->commit) && $this->commit !== null) {
+            $release = CheckResult::pass('the worker runs this release', checkedAt: $at);
+        } elseif ($outstanding !== []) {
+            // A probe dispatched after the answered one is still in flight, and
+            // the answer may predate a worker restart: it says which release a
+            // worker runs now. Judging the older answer would report a transient
+            // as a verdict. A worker that never reloaded answers the newer probe
+            // with the old commit too, and the result is then a fail.
+            $release = CheckResult::pending(5, 'waiting for the newest probe to be processed', $now);
+        } else {
+            $release = CheckResult::fail(Codes::QUEUE_RELEASE_MISMATCH, 'the worker that answered the latest probe runs a different commit', checkedAt: $at);
+        }
 
         return [$queue, $release];
     }

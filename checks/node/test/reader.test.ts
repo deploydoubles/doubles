@@ -43,6 +43,23 @@ async function runOnce(store: FileStore, config: Config, clock: FakeClock, onPro
   );
 }
 
+/**
+ * A probe answered by a worker on another commit, then a newer probe left unanswered.
+ * The clock moves between the runs (the reader ignores a probe that was not dispatched
+ * later than the newest answered one) and one second more before the caller reads.
+ */
+async function staleAnswerWithNewerProbe(): Promise<{ store: FileStore; config: Config; clock: FakeClock; newer: string }> {
+  const { store, config, clock } = setup();
+  await runOnce(store, config, clock, (p) => answerProbe(store, p, OTHER_COMMIT, clock.now));
+  clock.advance(60);
+  let newer = '';
+  await runOnce(store, config, clock, (p) => {
+    newer = p;
+  });
+  clock.advance(1);
+  return { store, config, clock, newer };
+}
+
 const read = (store: FileStore, config: Config, clock: FakeClock, commit = COMMIT) => readReport(store, config, commit, clock.now);
 
 describe('staleness and the scheduler', () => {
@@ -147,6 +164,72 @@ describe('the queue', () => {
 
     expect(report.deploy.checks.queue?.status).toBe('pass');
     expect(report.deploy.checks['queue.release']).toMatchObject({ status: 'fail', code: 'queue_release_mismatch' });
+  });
+
+  it('keeps queue.release pending while a newer probe waits behind an answer from another commit', async () => {
+    const { store, config, clock } = await staleAnswerWithNewerProbe();
+    const report = read(store, config, clock);
+
+    expect(report.deploy.checks.queue?.status).toBe('pass');
+    expect(report.deploy.checks['queue.release']).toMatchObject({ status: 'pending', retry_after: 5 });
+    expect(report.deploy.settled).toBe(false);
+    expect(report.status).toBe('warn');
+  });
+
+  it('fails queue.release once the newer probe is answered by the other commit too', async () => {
+    const { store, config, clock, newer } = await staleAnswerWithNewerProbe();
+    answerProbe(store, newer, OTHER_COMMIT, clock.now);
+    const report = read(store, config, clock);
+
+    expect(report.deploy.checks['queue.release']).toMatchObject({ status: 'fail', code: 'queue_release_mismatch' });
+    expect(report.deploy.settled).toBe(true);
+  });
+
+  it('passes queue.release once the newer probe is answered by this release', async () => {
+    const { store, config, clock, newer } = await staleAnswerWithNewerProbe();
+    answerProbe(store, newer, COMMIT, clock.now);
+    const report = read(store, config, clock);
+
+    expect(report.deploy.checks['queue.release']?.status).toBe('pass');
+    expect(report.status).toBe('pass');
+    expect(report.deploy.settled).toBe(true);
+  });
+
+  it('passes queue.release for a worker on this release even while a newer probe is still in flight', async () => {
+    const { store, config, clock } = setup();
+    await runOnce(store, config, clock, (p) => answerProbe(store, p, COMMIT, clock.now));
+    clock.advance(60);
+    await runOnce(store, config, clock, () => {});
+    clock.advance(1);
+    const report = read(store, config, clock);
+
+    expect(report.deploy.checks.queue?.status).toBe('pass');
+    expect(report.deploy.checks['queue.release']?.status).toBe('pass');
+  });
+
+  it('keeps queue.release pending for a worker whose answers always arrive after the next probe is dispatched', async () => {
+    const { store, config, clock } = setup();
+
+    // The first run's probe is left unanswered: with nothing answered yet, queue itself is pending.
+    let previous = '';
+    await runOnce(store, config, clock, (p) => {
+      previous = p;
+    });
+
+    for (let cycle = 1; cycle <= 3; cycle++) {
+      clock.advance(60);
+      let current = '';
+      await runOnce(store, config, clock, (p) => {
+        current = p;
+      });
+      answerProbe(store, previous, OTHER_COMMIT, clock.now);
+      clock.advance(1);
+      const report = read(store, config, clock);
+
+      expect(report.deploy.checks.queue?.status).toBe('pass');
+      expect(report.deploy.checks['queue.release']?.status).toBe('pending');
+      previous = current;
+    }
   });
 
   it('keeps queue pending while the oldest unanswered probe is younger than 120 s', async () => {

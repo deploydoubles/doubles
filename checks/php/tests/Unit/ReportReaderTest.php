@@ -43,6 +43,31 @@ function readReport(FileStore $store, Config $config, FakeClock $clock, string $
     return (new ReportReader($store, $config, $commit, $clock->closure()))->read()->toArray();
 }
 
+/**
+ * A probe answered by a worker on another commit, then a newer probe left unanswered.
+ * The clock moves between the runs (the reader ignores a probe that was not dispatched
+ * later than the newest answered one) and one second more before the caller reads.
+ *
+ * @return array{0: FileStore, 1: Config, 2: FakeClock, 3: string}
+ */
+function staleAnswerWithNewerProbe(): array
+{
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, OTHER_COMMIT, $clock->now));
+    $clock->advance(60);
+    $newer = '';
+    runOnce($store, $config, $clock, function (string $p) use (&$newer): void {
+        $newer = $p;
+    });
+    $clock->advance(1);
+
+    return [$store, $config, $clock, $newer];
+}
+
 it('reports only scheduler fail when stored results are older than 180 s', function () {
     $dir = tempDir();
     $store = new FileStore($dir);
@@ -121,6 +146,81 @@ it('fails queue.release when the worker runs another commit', function () {
     expect($report['deploy']['checks']['queue']['status'])->toBe('pass')
         ->and($report['deploy']['checks']['queue.release']['status'])->toBe('fail')
         ->and($report['deploy']['checks']['queue.release']['code'])->toBe('queue_release_mismatch');
+});
+
+it('keeps queue.release pending while a newer probe waits behind an answer from another commit', function () {
+    [$store, $config, $clock] = staleAnswerWithNewerProbe();
+    $report = readReport($store, $config, $clock);
+
+    expect($report['deploy']['checks']['queue']['status'])->toBe('pass')
+        ->and($report['deploy']['checks']['queue.release']['status'])->toBe('pending')
+        ->and($report['deploy']['checks']['queue.release']['retry_after'])->toBe(5)
+        ->and($report['deploy']['settled'])->toBeFalse()
+        ->and($report['status'])->toBe('warn');
+});
+
+it('fails queue.release once the newer probe is answered by the other commit too', function () {
+    [$store, $config, $clock, $newer] = staleAnswerWithNewerProbe();
+    Probes::answer($store, $newer, OTHER_COMMIT, $clock->now);
+    $report = readReport($store, $config, $clock);
+
+    expect($report['deploy']['checks']['queue.release']['status'])->toBe('fail')
+        ->and($report['deploy']['checks']['queue.release']['code'])->toBe('queue_release_mismatch')
+        ->and($report['deploy']['settled'])->toBeTrue();
+});
+
+it('passes queue.release once the newer probe is answered by this release', function () {
+    [$store, $config, $clock, $newer] = staleAnswerWithNewerProbe();
+    Probes::answer($store, $newer, COMMIT, $clock->now);
+    $report = readReport($store, $config, $clock);
+
+    expect($report['deploy']['checks']['queue.release']['status'])->toBe('pass')
+        ->and($report['status'])->toBe('pass')
+        ->and($report['deploy']['settled'])->toBeTrue();
+});
+
+it('passes queue.release for a worker on this release even while a newer probe is still in flight', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    runOnce($store, $config, $clock, fn (string $p) => Probes::answer($store, $p, COMMIT, $clock->now));
+    $clock->advance(60);
+    runOnce($store, $config, $clock, function (string $p): void {});
+    $clock->advance(1);
+    $report = readReport($store, $config, $clock);
+
+    expect($report['deploy']['checks']['queue']['status'])->toBe('pass')
+        ->and($report['deploy']['checks']['queue.release']['status'])->toBe('pass');
+});
+
+it('keeps queue.release pending for a worker whose answers always arrive after the next probe is dispatched', function () {
+    $dir = tempDir();
+    $store = new FileStore($dir);
+    $config = readerConfig($dir);
+    $clock = new FakeClock();
+
+    // The first run's probe is left unanswered: with nothing answered yet, queue itself is pending.
+    $previous = '';
+    runOnce($store, $config, $clock, function (string $p) use (&$previous): void {
+        $previous = $p;
+    });
+
+    foreach (range(1, 3) as $cycle) {
+        $clock->advance(60);
+        $current = '';
+        runOnce($store, $config, $clock, function (string $p) use (&$current): void {
+            $current = $p;
+        });
+        Probes::answer($store, $previous, OTHER_COMMIT, $clock->now);
+        $clock->advance(1);
+        $report = readReport($store, $config, $clock);
+
+        expect($report['deploy']['checks']['queue']['status'])->toBe('pass')
+            ->and($report['deploy']['checks']['queue.release']['status'])->toBe('pending');
+        $previous = $current;
+    }
 });
 
 it('keeps queue pending while the oldest unanswered probe is younger than 120 s', function () {
